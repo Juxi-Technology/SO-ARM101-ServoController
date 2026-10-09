@@ -1,0 +1,326 @@
+[English](../en/README.md) | [简体中文](../zh-hans/README.md) | [繁體中文](../zh-hant/README.md) | [Deutsch](../de/README.md) | [Español](../es/README.md) | [Français](../fr/README.md) | [Italiano](../it/README.md) | [日本語](../ja/README.md) | 한국어 | [Português (BR)](../pt-br/README.md) | [Português (PT)](../pt-pt/README.md)
+
+<div align="center">
+
+# So-ARM 시리즈 캘리브레이션 툴
+
+**So-ARM 10X 시리즈 로봇 암용 FTServo 서보를 위한 공장 캘리브레이션 및 LeRobot 캘리브레이션 툴킷**
+
+> ⚠️ **호환성 안내: 본 시스템은 현재 Feetech (STS3215 시리즈) 서보만 지원합니다.** 레지스터 테이블, xdat 파라미터 형식, 보드레이트 테이블은 모두 Feetech STS3215 시리즈를 기준으로 설계되었습니다. 다른 브랜드나 모델의 서보는 호환성을 보장하지 않습니다.
+
+> 📜 **출처 및 크레딧: 본 툴은 [Seeed Studio의 Seeed_RoboController](https://github.com/Seeed-Studio)를 기반으로 하여 확장한 것입니다.** 원본은 MIT 라이선스로 공개되었습니다. 본 프로젝트는 원래의 핵심 기능을 유지하면서 GUI를 재구성하고, FT 디버거, xdat 파라미터 백업/복원, 크로스 플랫폼 지원 등의 개선 사항을 추가했습니다. 자세한 내용은 [LICENSE](../../LICENSE)를 참조하십시오.
+
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Ubuntu%20%7C%20macOS-blue)
+![Python](https://img.shields.io/badge/python-3.8+-green)
+![GUI](https://img.shields.io/badge/GUI-PySide6-orange)
+
+[주요 기능](#-주요-기능) · [인터페이스 개요](#-인터페이스-개요) · [빠른 시작](#-빠른-시작) · [사용 단계](#-사용-단계) · [주의 사항](#-주의-사항) · [문제 해결](#-문제-해결)
+
+</div>
+
+---
+
+## ✨ 주요 기능
+
+| 기능 | 설명 |
+| ---- | ---- |
+| 자동 포트 감지 | USB 시리얼 포트를 식별하고 가상 장치를 걸러냅니다 |
+| 크로스 플랫폼 지원 | Windows / Ubuntu / macOS에서 동작합니다 |
+| 듀얼 포트 동기화 | 좌우 시리얼 포트가 독립적으로 동작하며, 마스터/슬레이브 듀얼 포트 동기 원격 제어를 지원합니다 |
+| 중국어/영어 전환 | 인터페이스를 한 번의 클릭으로 중국어와 영어 사이에서 전환하며, 선택한 언어는 자동으로 기억됩니다 |
+| 센터 캘리브레이션 | 서보의 현재 위치를 2048 센터로 기록합니다 (EEPROM에 영구 저장) |
+| 센터 테스트 | 토크를 활성화하고 서보를 센터로 이동시켜 캘리브레이션을 검증합니다 |
+| 모터 비활성화 | 모든 서보의 토크를 한 번의 클릭으로 해제하여 수동 조정을 가능하게 합니다 |
+| 자동 스캔 | ID가 1–20 범위인 모든 온라인 서보를 자동으로 감지합니다 |
+| 단일 서보 제어 | 슬라이더로 단일 서보의 위치와 토크 스위치를 실시간 제어합니다 |
+| FT 디버거 | 시리얼 연결, 스캔, 파라미터 읽기/쓰기, 위치 제어, 보드레이트 변경, 공장 초기화, xdat 파라미터 백업 |
+| xdat 파라미터 | 현재 서보의 EEPROM 파라미터를 저장 / 백업을 열어 복원합니다 |
+| LeRobot 캘리브레이션 | LeRobot 형식의 JSON 캘리브레이션 파일을 생성합니다 |
+| 캘리브레이션 파일로 센터 이동 | 캘리브레이션 파일에 따라 로봇 암을 센터로 이동시킵니다 |
+
+---
+
+## 📚 OS별 가이드
+
+| OS | 가이드 |
+|----|-------|
+| Windows | [Windows 가이드](Windows.md) |
+| Linux | [Linux 가이드](Linux.md) |
+| macOS | [macOS 가이드](macOS.md) |
+
+---
+
+## 🖥️ 인터페이스 개요
+
+메인 프로그램은 세 개의 탭으로 구성됩니다:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  SoARM 캘리브레이션 스위트   [Port1▾] [Port2▾] [🔄] [🎮 원격][EN] │  ← 상단 바
+├─────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────┬──────────────────────────────┐ │
+│  │ Port 1 - 서보 캘리브.       │ Port 2 - 서보 캘리브.        │ │
+│  │ [🔴 연결 안 됨] 현재:…      │ [🔴 연결 안 됨] 현재:…       │ │
+│  │ 서보 1–6 상태 테이블        │ 서보 1–6 상태 테이블         │ │
+│  │ [센터 캘][센터 테스트]…     │ [센터 캘][센터 테스트]…      │ │
+│  └─────────────────────────────┴──────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+- **상단 바**: 애플리케이션 제목, 시리얼 포트 드롭다운, 새로 고침 버튼, 원격 제어 버튼, 언어 전환 버튼.
+- **🦾 탭 1 — 서보 캘리브레이션**: 좌우 패널의 빠른 작업(센터 캘리브레이션, 센터 테스트, 모터 비활성화)과 실시간 상태.
+- **🎚️ 탭 2 — 단일 서보 제어**: 슬라이더로 각 온라인 서보의 위치를 미세 조정하고 토크를 전환합니다.
+- **🔬 탭 3 — FT 디버거**: 시리얼 연결, 스캔, 파라미터 읽기/쓰기, 위치 제어, 보드레이트/공장 초기화, xdat 파라미터 백업 및 복원.
+
+---
+
+## 🚀 빠른 시작
+
+> 시스템별 전체 안내는 [📚 OS별 가이드](#-os별-가이드)를 참조하십시오. 각 시스템의 핵심 사항은 다음과 같습니다.
+
+### Windows
+
+1. [Python 3.10+](https://www.python.org/downloads/)를 설치합니다 (**Add to PATH** 체크).
+2. 가상 환경을 만들고 의존성을 설치합니다:
+
+```bash
+cd SO-ARM101-ServoController
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+3. 환경을 확인하고 실행합니다:
+
+```bash
+python setup.py
+python -m src.gui.factory_calibration_tool
+```
+
+4. 장치 관리자에서 COM 포트(예: `COM3`)를 확인하고 상단 바에서 선택합니다. 포트를 직접 지정하려면:
+
+```bash
+python -m src.gui.factory_calibration_tool --port1 COM3 --port2 COM4
+```
+
+### Linux (Ubuntu / Debian)
+
+1. CJK 폰트와 의존성을 설치합니다:
+
+```bash
+sudo apt install python3-venv fonts-noto-cjk fonts-noto-color-emoji
+```
+
+2. **⚠️ 시리얼 포트 권한(dialout 그룹)을 추가합니다** [필수]:
+
+```bash
+sudo usermod -a -G dialout $USER
+# 로그아웃 후 다시 로그인하면 적용됩니다
+```
+
+3. 가상 환경을 만들고 의존성을 설치한 뒤 실행합니다:
+
+```bash
+cd SO-ARM101-ServoController
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python setup.py
+python -m src.gui.factory_calibration_tool
+```
+
+4. 시리얼 장치는 `/dev/ttyUSB0` / `/dev/ttyACM0`입니다. 직접 지정하려면:
+
+```bash
+python -m src.gui.factory_calibration_tool --port1 /dev/ttyUSB0 --port2 /dev/ttyUSB1
+```
+
+### macOS
+
+1. Homebrew로 Python을 설치합니다:
+
+```bash
+brew install python
+```
+
+2. 가상 환경을 만들고 의존성을 설치한 뒤 실행합니다:
+
+```bash
+cd SO-ARM101-ServoController
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python setup.py
+python -m src.gui.factory_calibration_tool
+```
+
+3. **⚠️ 시리얼 포트 이름 지정**: macOS에서는 `/dev/tty.*` 대신 `/dev/cu.usbserial-*`(**권장, 비블로킹**)를 사용합니다. 목록을 확인하려면:
+
+```bash
+ls /dev/cu.*
+```
+
+직접 지정하려면:
+
+```bash
+python -m src.gui.factory_calibration_tool --port1 /dev/cu.usbserial-0001 --port2 /dev/cu.usbmodem141101
+```
+
+### 일반 명령줄 도구 (GUI 불필요)
+
+```bash
+# 서보 스캔
+python -m src.tools.scan_id
+
+# 서보 빠른 센터 캘리브레이션
+python -m src.tools.servo_quick_calibration
+
+# 서보 센터 테스트
+python -m src.tools.servo_center_test
+
+# 모든 서보 비활성화
+python -m src.tools.servo_disable
+
+# LeRobot 방식 캘리브레이션
+python -m src.tools.lerobot_calibrate
+
+# 듀얼 포트 동기 원격 제어
+python -m src.tools.servo_remote_control
+```
+
+---
+
+## 📖 사용 단계
+
+### 1. 서보 연결 및 감지
+
+1. USB-시리얼 어댑터를 통해 로봇 암의 제어 보드를 연결하고 서보에 전원을 공급합니다.
+2. GUI를 열고 상단 바의 시리얼 드롭다운에서 해당 포트를 선택합니다 (또는 `🔄`를 클릭하여 새로 고침).
+3. 패널 상단에 `🟢 Connected`가 표시되고, ID가 1–20 범위(일반적으로 1–6)인 온라인 서보를 자동으로 스캔합니다.
+
+> 포트가 사용 중이라고 표시되면 다른 프로그램(시리얼 모니터, 또는 종료되지 않은 이전 실행)이 해당 포트를 점유하고 있지 않은지 확인하십시오.
+
+### 2. 센터 캘리브레이션 (현재 위치를 2048로 설정)
+
+> 캘리브레이션 전에 각 관절이 원하는 "영점 / 센터" 위치에 오도록 로봇 암의 자세를 물리적으로 잡아 주십시오.
+
+1. 패널의 **Serial X Center Calibration** 버튼을 클릭합니다.
+2. 프로그램은 먼저 서보를 비활성화하고, 원하는 센터로 서보를 손으로 움직이라고 안내합니다.
+3. 확인하면 프로그램이 각 서보를 처리합니다: EEPROM 잠금 해제 → 캘리브레이션 명령 기록(주소 40에 값 128) → EEPROM 재잠금.
+4. "센터 테스트"로 검증합니다: 서보가 위치를 유지하면(거의 움직이지 않으면) 캘리브레이션이 성공한 것입니다.
+
+### 3. 센터 테스트
+
+1. **Serial X Center Test**를 클릭합니다.
+2. 프로그램이 토크를 활성화하고 모든 서보를 2048로 이동시킵니다.
+3. 서보가 현재 위치에서 거의 움직이지 않으면 캘리브레이션이 올바른 것이고, 크게 움직이면 해당 캘리브레이션 값이 신뢰할 수 없으므로 다시 해야 합니다.
+
+### 4. 모터 비활성화 (수동 조정)
+
+- **Serial X Disable Motors**를 클릭하면 해당 포트의 모든 서보 토크가 해제되어 손으로 자유롭게 회전할 수 있습니다.
+- 개별 서보는 **단일 서보 제어** 탭에서 슬라이더 아래의 토크 스위치로 개별 전환할 수 있습니다.
+
+### 5. 서보 ID 변경
+
+1. **🔬 FT 디버거** 탭을 열고 시리얼 포트에 연결한 뒤 서보를 스캔합니다.
+2. 대상 서보를 선택하고 파라미터 테이블에서 "Servo ID" 값(주소 0x05)을 변경한 뒤 쓰기를 클릭합니다.
+3. 프로그램은 이어서 다음을 수행합니다: 잠금 해제 → 주소 5에 쓰기 → 새 ID 검증 → 재잠금.
+
+> ⚠️ ID를 변경하기 전에 반드시 버스에 이 서보만 있는지 확인하여 ID 충돌을 피하십시오.
+
+### 6. 보드레이트 변경 / 공장 초기화
+
+- **보드레이트 변경**: FT 디버거 탭의 "Baud Rate / Factory Reset" 영역에서 새 보드레이트(38400 – 1000000 bps)를 선택하여 적용합니다. 기록 후 시리얼 보드레이트가 자동으로 전환되고 ping으로 검증되며, 실패하면 자동으로 롤백됩니다.
+- **공장 초기화**: 서보가 공장 기본값(ID=1, 보드레이트=1000000)으로 돌아가며, 이후 다시 스캔해야 합니다.
+
+### 7. xdat 파라미터 백업 및 복원
+
+FT 디버거 탭의 "xdat parameters (save EEPROM only)" 영역에서:
+
+1. **💾 Save current servo**: 선택한 서보의 EEPROM 파라미터를 xdat 파일로 저장합니다(백업).
+2. 서보의 파라미터를 마음대로 변경한 뒤 되돌리고 싶다면:
+3. **📂 Open xdat**: 백업 파일을 불러옵니다.
+4. **📤 Restore parameters to servo**: 백업을 현재 서보의 EEPROM에 다시 기록합니다.
+
+### 8. 듀얼 포트 동기 원격 제어
+
+> ⚠️ **방향 안내: Port 1이 Port 2를 제어합니다.** Port 1(마스터)은 서보 각도만 읽고, Port 2(슬레이브)가 동기화되어 구동됩니다.
+
+1. 상단 바에서 **🎮 Remote**를 클릭합니다 (Port 1이 각도를 읽음 → Port 2가 동일한 ID의 서보를 동기화하여 구동).
+2. 두 포트는 서보 ID가 일치해야 하며, 양쪽에 모두 존재하는 서보만 동기화됩니다.
+3. 같은 버튼을 다시 클릭하면 정지하며, 이후 좌우 패널의 스캔 스레드가 자동으로 재개됩니다.
+
+### 9. LeRobot 캘리브레이션 (명령줄)
+
+```bash
+# 팔로워 암 캘리브레이션 (~/.cache/huggingface/lerobot/calibration/robots/so_follower/에 저장)
+python -m src.tools.lerobot_calibrate --arm-type follower
+
+# 리더 암 캘리브레이션
+python -m src.tools.lerobot_calibrate --arm-type leader
+```
+
+절차: 서보 비활성화 → 각 관절을 센터에 맞추고 `homing_offset` 기록 → 전체 범위를 천천히 회전시켜 `range_min/max` 기록(`wrist_roll`은 연속 회전 관절로 범위가 `[0,4095]`로 고정) → JSON 저장.
+
+캘리브레이션 파일로 센터까지 이동:
+
+```bash
+python -m src.tools.run_calibration_middle <calibration_file.json> --mode zero
+```
+
+---
+
+## ⚠️ 주의 사항
+
+1. **안전 우선**: 센터 캘리브레이션은 EEPROM에 영구 저장됩니다. 캘리브레이션 전에 전원이 안정적인지, 로봇 암이 사람이나 물체와 충돌하지 않는지 확인하십시오.
+2. **전원 공급**: SoARM 101 표준판은 DC 5V 5A, Pro판은 DC 12V 5A로 전원을 공급하는 것이 가장 좋습니다. 전원이 부족하면 스텝 미스나 통신 실패가 발생합니다.
+3. **시리얼 포트 독점**: Windows에서는 시리얼 포트가 독점되므로, 동일한 포트를 GUI 스캔 스레드와 캘리브레이션 하위 프로세스가 동시에 사용할 수 없습니다. 본 툴은 작업 전에 스캔 스레드를 중지하고 이전 프로세스를 종료하므로, 손으로 반복해서 클릭하지 마십시오.
+4. **Linux 시리얼 권한**: `/dev/ttyUSB*` / `/dev/ttyACM*`에 접근하려면 사용자를 `dialout` 그룹에 추가해야 합니다 ([Linux 가이드](Linux.md) 참조).
+5. **macOS 시리얼 이름 지정**: `/dev/tty.*`(블로킹, 멈출 수 있음) 대신 `/dev/cu.*`(비블로킹)를 사용하십시오. [macOS 가이드](macOS.md)를 참조하십시오.
+6. **핫 플러그**: USB 케이블을 뽑으면 프로그램이 자동으로 재연결을 시도합니다. 다시 연결한 후 `🔄`를 클릭하여 포트 목록을 새로 고치십시오.
+7. **과온 / 과전압 보호**: 프로그램은 전압과 온도를 모니터링합니다(60°C 초과 시 경고). 서보가 계속 뜨거우면 멈추고 식히십시오.
+8. **센터 캘리브레이션은 되돌릴 수 없습니다**: 기록하면 원래 오프셋을 덮어쓰며 취소할 수 없습니다. 캘리브레이션 전에 원래 위치를 기록해 두십시오.
+9. **ID 변경 위험**: 기록이나 검증이 실패하면 프로그램이 오류를 보고하고 스캔을 재개하지만, 극단적인 경우 서보가 "실종"될 수 있습니다. 그런 경우 "공장 초기화"를 시도하십시오(초기화 후 ID는 1로 돌아갑니다).
+10. **인코딩 문제**: Windows 콘솔에서 이모지가 깨져 보이면 명령줄 도구를 실행하기 전에 `PYTHONIOENCODING=utf-8`을 설정하십시오. Linux/macOS는 기본 UTF-8을 사용하므로 일반적으로 문제가 없습니다.
+
+---
+
+## 🛠️ 문제 해결
+
+| 증상 | 가능한 원인 | 해결 방법 |
+| ---- | -------- | -------- |
+| 시리얼 포트를 열 수 없음 / 포트 사용 중 | 다른 프로그램이 사용 중 | 시리얼 모니터 등의 프로그램을 닫거나 다른 포트로 전환한 뒤 툴을 재시작하십시오 |
+| 서보를 찾을 수 없음 | 전원 부족 / 배선 오류 / 보드레이트 불일치 | 전원과 배선을 확인하고 서보가 1M 보드레이트인지 확인하십시오 |
+| 센터 캘리브레이션 후 서보가 폭주함 | 캘리브레이션 전에 자세를 잡지 않음 | "비활성화 → 손으로 자세 잡기 → 센터 캘리브레이션"을 반복하십시오 |
+| 온도가 너무 빠르게 상승 | 부하가 과도하거나 관절이 걸림 | 기구 걸림을 확인하고 속도/가속도를 낮추십시오 |
+| ID 변경 후 서보를 찾을 수 없음 | ID 충돌 또는 기록 실패 | 공장 초기화 후 다시 스캔하십시오 |
+| 원격 제어가 동기화되지 않음 | 두 포트의 ID가 다름 | 마스터/슬레이브 포트에 동일 ID의 서보가 온라인인지 확인하십시오 |
+
+---
+
+## 📁 프로젝트 구조
+
+```
+SO-ARM101-ServoController/
+├── docs/                    # 문서, 언어별 폴더
+│   └── <lang>/              # en, zh-hans, zh-hant, de, es, fr, it, ja, ko, pt-br, pt-pt
+│       ├── README.md        # 이 문서
+│       ├── Windows.md
+│       ├── Linux.md
+│       └── macOS.md
+├── src/
+│   ├── gui/                  # PySide6 그래픽 인터페이스
+│   │   ├── factory_calibration_tool.py   # 메인 툴 (듀얼 포트 캘리브레이션 + 원격 제어 + 언어 전환)
+│   │   ├── ft_debugger.py                # FT 디버거 (파라미터 읽기/쓰기 / xdat 백업)
+│   │   ├── calibration_wizard.py         # LeRobot 캘리브레이션 마법사
+│   │   ├── theme_utils.py                # 라이트 테마
+│   │   └── language_dialog.py            # 언어 선택 대화상자
+│   ├── tools/                # 명령줄 도구
+│   ├── xdat_utils.py         # xdat 파라미터 파일 읽기/쓰기
+│   ├── i18n*.py / i18n_translations/     # 중국어/영어 국제화
+│   ├── port_utils.py         # 시리얼 포트 감지
+│   └── calibration_manager.py# LeRobot 캘리브레이션 파일 관리
+├── scservo_sdk/              # FTServo 서보 통신 SDK
+├── requirements.txt
+└── setup.py                  # 환경 검사 스크립트
+```
