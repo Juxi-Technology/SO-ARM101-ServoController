@@ -93,6 +93,8 @@ python setup.py
 ## 6. Iniciar la GUI
 
 ```bash
+python main.py
+# o
 python -m src.gui.factory_calibration_tool
 ```
 
@@ -107,10 +109,16 @@ python -m src.gui.factory_calibration_tool --port1 /dev/ttyUSB0 --port2 /dev/tty
 ## 7. Flujo de trabajo de la interfaz
 
 ### 7.1 Pestaña de calibración de servos
-Seleccione el puerto y escanee los servos automáticamente; calibración de centro / prueba de centro / desactivar servos.
+Seleccione el puerto del brazo líder/seguidor; los servos se escanean automáticamente.
+
+- La calibración de centro abre el asistente de calibración de LeRobot: monitor en vivo a la izquierda (ID / Pos / control deslizante), tabla de calibración a la derecha.
+- **Iniciar registro del centro** → coloque el brazo en su centro → **Finalizar registro del centro**; después **Registrar recorrido** (se vuelve verde) → mueva cada articulación de límite a límite, incluido el gripper → vuelva a hacer clic para detener.
+- Cuando las seis articulaciones estén completas, el archivo de calibración se guarda automáticamente y sobrescribe el anterior.
+
+> ⚠️ Barra ambos brazos sobre el mismo recorrido; de lo contrario, el movimiento del seguidor no coincidirá con el del líder.
 
 ### 7.2 Pestaña de control de un solo servo
-Control de posición con control deslizante, interruptor de par.
+Cada fila: ID / Pos / control deslizante / L (objetivo). **Pos y el control deslizante están vinculados en ambos sentidos**: al arrastrar se actualiza Pos; al escribir en Pos se mueve el control deslizante y se envía la orden inmediatamente. La orden se envía al soltar, no mientras se arrastra.
 
 ### 7.3 Pestaña del depurador FT
 - Conexión serie (1M por defecto), escanear servos
@@ -122,9 +130,9 @@ Control de posición con control deslizante, interruptor de par.
 
 ### 7.4 Control remoto
 
-> ⚠️ **Dirección: el puerto 1 controla el puerto 2**. El puerto 1 (maestro) lee los ángulos, el puerto 2 (esclavo) se sincroniza. Requiere ID coincidentes en ambos puertos.
+> ⚠️ **Dirección: el brazo líder controla el brazo seguidor**. El brazo líder (maestro) lee los ángulos, el brazo seguidor (esclavo) se sincroniza. Requiere ID coincidentes en ambos puertos.
 
-Barra superior `🎮 Remoto`: el puerto 1 lee → el puerto 2 controla (se requiere el mismo ID de servo en ambos puertos)
+Barra superior `🎮 Remoto`: el líder lee → el seguidor controla (se requiere el mismo ID de servo en ambos puertos)
 
 ## 8. Solución de problemas
 

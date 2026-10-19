@@ -91,6 +91,8 @@ python setup.py
 ## 7. Avviare la GUI
 
 ```bash
+python main.py
+# or
 python -m src.gui.factory_calibration_tool
 ```
 
@@ -105,10 +107,18 @@ python -m src.gui.factory_calibration_tool --port1 /dev/cu.usbserial-0001 --port
 ## 8. Flusso dell'interfaccia
 
 ### 8.1 Scheda Calibrazione dei servo
-Seleziona la porta, scansiona automaticamente i servo; calibrazione del centro / test del centro / disattivazione dei servo.
+Seleziona la porta del braccio leader/follower; i servo vengono scansionati automaticamente.
+
+- La calibrazione del centro apre la procedura guidata di calibrazione LeRobot: monitor in tempo reale a sinistra (ID / Pos / cursore), tabella di calibrazione a destra.
+- **Avvia registrazione centro** → porta il braccio al centro → **Termina registrazione centro**; poi **Registra corsa** (diventa verde) → muovi ogni articolazione da un limite all'altro, pinza inclusa → fai clic di nuovo per fermare.
+- Una volta completate tutte e sei le articolazioni, il file di calibrazione viene salvato automaticamente e sovrascrive il precedente.
+
+> ⚠️ Registra la stessa corsa su entrambi i bracci, altrimenti il movimento del follower non corrisponderà a quello del leader.
 
 ### 8.2 Scheda Controllo di un singolo servo
-Controllo della posizione tramite cursore, interruttore di coppia.
+- Ogni riga: ID / Pos / cursore / L (destinazione)
+- **Pos e il cursore sono bidirezionalmente collegati**: trascinando il cursore si aggiorna Pos; digitando in Pos si sposta il cursore e si invia subito il comando
+- Il comando viene inviato al rilascio, non durante il trascinamento
 
 ### 8.3 Scheda Debugger FT
 - Connessione seriale (1M predefinito), scansione dei servo
@@ -120,9 +130,9 @@ Controllo della posizione tramite cursore, interruttore di coppia.
 
 ### 8.4 Telecomando
 
-> ⚠️ **Direzione: la porta 1 controlla la porta 2**. La porta 1 (master) legge gli angoli, la porta 2 (slave) è sincronizzata. Richiede ID corrispondenti su entrambe le porte.
+> ⚠️ **Direzione: il braccio leader controlla il braccio follower**. Il braccio leader (master) legge gli angoli, il braccio follower (slave) è sincronizzato. Richiede ID corrispondenti su entrambe le porte.
 
-Barra superiore `🎮 Telecomando`: la porta 1 legge → la porta 2 controlla (servo con lo stesso ID su entrambe le porte)
+Barra superiore `🎮 Telecomando`: il leader legge → il follower controlla (servo con lo stesso ID su entrambe le porte)
 
 ## 9. Risoluzione dei problemi
 

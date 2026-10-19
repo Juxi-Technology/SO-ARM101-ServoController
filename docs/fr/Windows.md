@@ -70,8 +70,12 @@ Ports (COM & LPT)
 ## 6. Lancer l'interface graphique
 
 ```bash
+python main.py
+# or
 python -m src.gui.factory_calibration_tool
 ```
+
+> **Option sans installation (Windows)** : double-cliquez `dist\SO-ARM101-ServoController.exe` ; la machine cible n'a pas besoin de Python. Reconstruisez avec `pyinstaller -y SO-ARM101-ServoController.spec`.
 
 Ou spécifiez les ports (s'ils sont occupés) :
 
@@ -89,16 +93,25 @@ python -m src.gui.factory_calibration_tool --list-ports
 
 ### 7.1 Onglet Calibration des servos
 
-1. Sélectionnez Port1/Port2 dans la barre supérieure → analyse automatique des servos (ID 1-6)
+1. Sélectionnez le port leader/follower dans la barre supérieure → analyse automatique des servos (ID 1-6)
 2. Boutons courants :
-   - **Calibration du centre** : définit la position actuelle comme centre 2048
-   - **Test du centre** : active le couple et déplace vers le centre pour vérifier
-   - **Désactiver les servos** : coupe le couple pour une rotation manuelle
+   - **Calibration du centre du bras leader / follower** : ouvre l'assistant de calibration LeRobot
+     - Colonne de gauche : moniteur en direct des six servos (ID / Pos / curseur)
+     - **Start Recording Middle** (devient orange) → positionnez le bras à son centre → **Finish Recording Middle**
+     - **Record Range** (devient vert) → balayez chaque articulation d'une limite à l'autre, pince comprise → cliquez à nouveau pour arrêter
+     - Une fois les six articulations terminées, le fichier de calibration est enregistré automatiquement et écrase le précédent, et les décalages/limites sont réécrits dans l'EEPROM des servos
+   - **Test du centre du bras leader / follower** : active le couple et déplace vers le centre pour vérifier
+   - **Désactivation des moteurs du bras leader / follower** : coupe le couple pour une rotation manuelle
+
+> ⚠️ Balayez les deux bras sur la même course, sinon le mouvement du follower ne correspondra pas à celui du leader pendant la téléopération.
 
 ### 7.2 Onglet Commande d'un servo individuel
 
-- Faites glisser le curseur → le servo se déplace vers la position cible au relâchement
-- L'interrupteur de couple contrôle les servos individuellement
+- Chaque ligne : ID / Pos / curseur / L (cible)
+- **Pos et le curseur sont liés dans les deux sens** : faire glisser le curseur met Pos à jour ; saisir une valeur dans Pos déplace le curseur et envoie immédiatement la commande
+- La commande est envoyée au relâchement du curseur, pas en continu pendant le glissement
+- Pendant le mouvement du servo, le curseur et Pos suivent la position réelle
+- ⚡ Couple / 🎯 Centre / 🧹 Effacer les limites agissent sur ce seul servo
 
 ### 7.3 Onglet Débogueur FT
 
@@ -118,9 +131,9 @@ python -m src.gui.factory_calibration_tool --list-ports
 
 ### 7.4 Télécommande
 
-> ⚠️ **Sens : le port 1 commande le port 2**. Le port 1 (maître) ne fait que lire les angles des servos, le port 2 (esclave) est synchronisé. Nécessite des ID de servo identiques sur les deux ports.
+> ⚠️ **Sens : le bras leader commande le bras follower**. Le bras leader (maître) ne fait que lire les angles des servos ; le bras follower (esclave) est synchronisé. Nécessite des ID de servo identiques sur les deux ports.
 
-- Bouton `🎮 Remote` de la barre supérieure : le port 1 lit → le port 2 commande (servos de même ID)
+- Bouton `🎮 Remote` de la barre supérieure : le leader lit → le follower commande (servos de même ID)
 - Cliquez à nouveau pour arrêter la télécommande
 
 ## 8. Dépannage

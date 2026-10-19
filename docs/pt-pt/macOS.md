@@ -91,6 +91,8 @@ python setup.py
 ## 7. Iniciar a GUI
 
 ```bash
+python main.py
+# ou
 python -m src.gui.factory_calibration_tool
 ```
 
@@ -105,10 +107,18 @@ python -m src.gui.factory_calibration_tool --port1 /dev/cu.usbserial-0001 --port
 ## 8. Fluxo da Interface
 
 ### 8.1 Separador de Calibração de Servo
-Selecione a porta, procure servos automaticamente; calibração de centro / teste de centro / desativar servos.
+Selecione a porta do braço leader/follower; os servos são procurados automaticamente.
+
+- A calibração de centro abre o assistente de calibração LeRobot: monitor em tempo real à esquerda (ID / Pos / deslizador), tabela de calibração à direita.
+- **Iniciar registo do centro** → coloque o braço no centro → **Terminar registo do centro**; depois **Registar intervalo** (fica verde) → varra cada articulação de limite a limite, incluindo a garra → clique novamente para parar.
+- Quando as seis articulações estiverem completas, o ficheiro de calibração é guardado automaticamente e substitui o anterior.
+
+> ⚠️ Varra os dois braços pelo mesmo curso, caso contrário o movimento do follower não coincidirá com o do leader.
 
 ### 8.2 Separador de Controlo de Servo Individual
-Controlo de posição por deslizador, interruptor de binário.
+- Cada linha: ID / Pos / deslizador / L (destino)
+- **Pos e o deslizador estão ligados nos dois sentidos**: arrastar atualiza Pos; introduzir em Pos move o deslizador e envia o comando imediatamente
+- O comando é enviado ao largar, não durante o arrastamento
 
 ### 8.3 Separador do Depurador FT
 - Ligação série (1M por predefinição), procurar servos
@@ -120,9 +130,9 @@ Controlo de posição por deslizador, interruptor de binário.
 
 ### 8.4 Controlo Remoto
 
-> ⚠️ **Direção: a Port1 controla a Port2**. A Port1 (mestre) lê os ângulos, a Port2 (escravo) é sincronizada. Requer IDs correspondentes em ambas as portas.
+> ⚠️ **Direção: o braço leader controla o braço follower**. O braço leader (mestre) lê os ângulos; o braço follower (escravo) é sincronizado. Requer IDs correspondentes em ambas as portas.
 
-Barra superior `🎮 Remoto`: a Port1 lê → a Port2 controla (servos com o mesmo ID em ambas as portas)
+Barra superior `🎮 Remoto`: o leader lê → o follower controla (servos com o mesmo ID em ambas as portas)
 
 ## 9. Resolução de Problemas
 

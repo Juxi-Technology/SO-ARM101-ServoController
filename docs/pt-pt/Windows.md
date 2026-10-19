@@ -70,8 +70,12 @@ Ports (COM & LPT)
 ## 6. Iniciar a GUI
 
 ```bash
+python main.py
+# ou
 python -m src.gui.factory_calibration_tool
 ```
+
+> **Opção sem instalação (Windows)**: faça duplo clique em `dist\SO-ARM101-ServoController.exe`; a máquina de destino não precisa de Python. Recompile com `pyinstaller -y SO-ARM101-ServoController.spec`.
 
 Ou especifique as portas (se estiverem ocupadas):
 
@@ -89,16 +93,25 @@ python -m src.gui.factory_calibration_tool --list-ports
 
 ### 7.1 Separador de Calibração de Servo
 
-1. Selecione Port1/Port2 na barra superior → procure servos automaticamente (ID 1-6)
+1. Selecione a porta do braço leader/follower na barra superior → os servos são procurados automaticamente (ID 1-6)
 2. Botões comuns:
-   - **Calibração de Centro**: define a posição atual como centro 2048
-   - **Teste de Centro**: ativa o binário e move para o centro para verificar
-   - **Desativar Servos**: desliga o binário para rotação manual
+   - **Calibração de Centro do Braço Leader/Follower**: abre o assistente de calibração LeRobot
+     - Coluna esquerda: monitor em tempo real dos seis servos (ID / Pos / deslizador)
+     - **Iniciar registo do centro** (fica laranja) → coloque o braço no centro → **Terminar registo do centro**
+     - **Registar intervalo** (fica verde) → varra cada articulação de limite a limite, incluindo a garra → clique novamente para parar
+     - Quando as seis articulações estiverem completas, o ficheiro de calibração é guardado automaticamente e substitui o anterior, e os desvios/limites são escritos de volta na EEPROM dos servos
+   - **Teste de Centro do Braço Leader/Follower**: ativa o binário e move para o centro para verificar
+   - **Desativar Motores do Braço Leader/Follower**: desativa o binário para movimento manual
+
+> ⚠️ Varra os dois braços pelo mesmo curso, caso contrário o movimento do follower não coincidirá com o do leader durante a teleoperação.
 
 ### 7.2 Separador de Controlo de Servo Individual
 
-- Arraste o deslizador → o servo move-se para a posição de destino ao largar
-- O interruptor de binário controla servos individuais
+- Cada linha: ID / Pos / deslizador / L (destino)
+- **Pos e o deslizador estão ligados nos dois sentidos**: arrastar o deslizador atualiza Pos; introduzir em Pos move o deslizador e envia o comando imediatamente
+- O comando é enviado ao largar o deslizador, não continuamente durante o arrastamento
+- Enquanto o servo se move, o deslizador e Pos acompanham a posição real
+- ⚡ Binário / 🎯 Centro / 🧹 Limpar limites atuam sobre esse servo individual
 
 ### 7.3 Separador do Depurador FT
 
@@ -118,9 +131,9 @@ python -m src.gui.factory_calibration_tool --list-ports
 
 ### 7.4 Controlo Remoto
 
-> ⚠️ **Direção: a Port1 controla a Port2**. A Port1 (mestre) apenas lê os ângulos dos servos, a Port2 (escravo) é sincronizada. Requer IDs de servo correspondentes em ambas as portas.
+> ⚠️ **Direção: o braço leader controla o braço follower**. O braço leader (mestre) apenas lê os ângulos dos servos; o braço follower (escravo) é sincronizado. Requer IDs de servo correspondentes em ambas as portas.
 
-- Botão `🎮 Remote` da barra superior: Port1 lê → Port2 controla (servos com o mesmo ID)
+- Botão `🎮 Remote` da barra superior: o leader lê → o follower controla (servos com o mesmo ID)
 - Clique novamente para parar o controlo remoto
 
 ## 8. Resolução de Problemas

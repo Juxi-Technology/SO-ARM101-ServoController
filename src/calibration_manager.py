@@ -3,7 +3,7 @@
 """
 LeRobot 校准文件管理模块
 读取和管理 ~/.cache/huggingface/lerobot/calibration/ 下的
-robots（从动臂）和 teleoperators（领导臂）校准文件
+robots（从动臂）和 teleoperators（主动臂）校准文件
 """
 
 import json
@@ -184,7 +184,7 @@ if __name__ == "__main__":
     for file_path in manager.get_calibration_files("robots"):
         print(f"  {file_path}")
 
-    print("\n=== 领导臂 (teleoperators) 校准文件 ===")
+    print("\n=== 主动臂 (teleoperators) 校准文件 ===")
     for file_path in manager.get_calibration_files("teleoperators"):
         print(f"  {file_path}")
 

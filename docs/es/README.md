@@ -26,16 +26,17 @@
 | ---- | ---- |
 | Detección automática de puertos | Identifica los puertos serie USB y descarta los dispositivos virtuales |
 | Compatibilidad multiplataforma | Funciona en Windows / Ubuntu / macOS |
-| Sincronización de doble puerto | Los puertos serie izquierdo y derecho funcionan de forma independiente, con control remoto sincronizado de doble puerto maestro/esclavo |
+| Sincronización de doble puerto | Los puertos del brazo líder y del brazo seguidor funcionan de forma independiente, con control remoto sincronizado líder/seguidor |
 | Conmutación chino/inglés | Cambia la interfaz entre chino e inglés con un solo clic; la elección se recuerda |
-| Calibración de centro | Graba la posición actual del servo como centro 2048 (persistida en la EEPROM) |
+| Calibración de centro de un solo servo | Graba la posición actual de un solo servo como centro 2048 (persistida en la EEPROM) |
 | Prueba de centro | Activa el par y mueve los servos al centro para verificar la calibración |
 | Desactivar motores | Desactiva el par de todos los servos con un solo clic para el ajuste manual |
 | Escaneo automático | Detecta automáticamente todos los servos en línea con un ID en el rango 1–20 |
 | Control de un solo servo | Control deslizante en tiempo real de la posición de un servo y su interruptor de par |
 | Depurador FT | Conexión serie, escaneo, lectura/escritura de parámetros, control de posición, cambio de velocidad en baudios, restablecimiento de fábrica, copia de seguridad de parámetros xdat |
 | Parámetros xdat | Guarda los parámetros de la EEPROM del servo actual / abre una copia de seguridad para restaurarla |
-| Calibración de LeRobot | Genera archivos de calibración JSON en formato LeRobot |
+| Calibración de LeRobot | Calibración completa con un clic para el brazo líder / seguidor (centro de postura + barrido de recorrido), creando y sobrescribiendo el archivo de calibración automáticamente |
+| Compilación en un solo archivo | PyInstaller empaqueta todo en un único exe; la máquina de destino no necesita Python y todas las herramientas de línea de comandos se alojan en el mismo ejecutable |
 | Ir al centro desde un archivo de calibración | Lleva el brazo al centro a partir de un archivo de calibración |
 
 ---
@@ -56,10 +57,10 @@ El programa principal contiene tres pestañas:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  SoARM Calibration Suite   [Port1▾] [Port2▾] [🔄] [🎮 Remoto][EN]│  ← Barra superior
+│  SoARM Calib. Suite   [Leader▾] [Follower▾] [🔄] [🎮 Remoto][EN]│  ← Barra superior
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌─────────────────────────────┬──────────────────────────────┐ │
-│  │ Puerto 1 - Calib. servo     │ Puerto 2 - Calib. servo      │ │
+│  │ Leader - Calib. servo       │ Follower - Calib. servo      │ │
 │  │ [🔴 No conectado] Actual:…  │ [🔴 No conectado] Actual:…   │ │
 │  │ Tabla de estado servo 1–6   │ Tabla de estado servo 1–6    │ │
 │  │[Calib. centro][Test centro]…│ [Calib. centro][Test centro]…│ │
@@ -67,9 +68,9 @@ El programa principal contiene tres pestañas:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-- **Barra superior**: título de la aplicación, menús desplegables de puerto serie, botón de actualización, botón de control remoto y botón de cambio de idioma.
-- **🦾 Pestaña 1 — Calibración de servos**: acciones rápidas en los paneles izquierdo y derecho (calibración de centro, prueba de centro, desactivar motores) y estado en vivo.
-- **🎚️ Pestaña 2 — Control de un solo servo**: ajusta con precisión la posición de cada servo en línea con un control deslizante y activa o desactiva su par.
+- **Barra superior**: título de la aplicación, menús desplegables de puerto del brazo líder / brazo seguidor, botón de actualización, botón de control remoto y botón de cambio de idioma.
+- **🦾 Pestaña 1 — Calibración de servos**: acciones rápidas en los paneles izquierdo y derecho (calibración de centro, prueba de centro, desactivar motores) y estado en vivo. La **calibración de centro** abre el asistente de calibración de LeRobot (véase la sección 2) para una calibración de todo el brazo en un solo paso.
+- **🎚️ Pestaña 2 — Control de un solo servo**: una fila por servo — ID / valor Pos / control deslizante / L (objetivo). Pos y el control deslizante están **vinculados en ambos sentidos**: al arrastrar el control deslizante se actualiza Pos; al escribir un valor en Pos se mueve el control deslizante y se envía inmediatamente la orden de posición.
 - **🔬 Pestaña 3 — Depurador FT**: conexión serie, escaneo, lectura/escritura de parámetros, control de posición, cambio de velocidad en baudios / restablecimiento de fábrica, y copia de seguridad y restauración de parámetros xdat.
 
 ---
@@ -90,12 +91,16 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-3. Compruebe el entorno e inicie:
+3. Compruebe el entorno e inicie (ambos puntos de entrada son equivalentes):
 
 ```bash
 python setup.py
+python main.py
+# o
 python -m src.gui.factory_calibration_tool
 ```
+
+> **Opción sin instalación (Windows)**: haga doble clic en `dist\SO-ARM101-ServoController.exe` — no se necesita Python en la máquina de destino. Recompílelo con `pyinstaller -y SO-ARM101-ServoController.spec`. El mismo exe también aloja todas las herramientas de línea de comandos (véase la sección 10).
 
 4. Confirme el puerto COM en el Administrador de dispositivos (por ejemplo, `COM3`) y selecciónelo en la barra superior. Para especificar los puertos manualmente:
 
@@ -200,27 +205,52 @@ python -m src.tools.servo_remote_control
 
 > Si el puerto aparece como ocupado, asegúrese de que ningún otro programa (un monitor serie, o una ejecución anterior de la herramienta que nunca se cerró) lo esté usando.
 
-### 2. Calibración de centro (establecer la posición actual en 2048)
+### 2. Calibración de centro (brazo líder / brazo seguidor)
 
 > Antes de calibrar, coloque físicamente el brazo de modo que cada articulación quede en la posición de "cero / centro" deseada.
 
-1. Haga clic en el botón **Calibración de centro del puerto X** del panel.
-2. El programa desactiva primero los servos y le pide que los mueva a mano hasta el centro deseado.
-3. Una vez que confirme, el programa procesa cada servo: desbloquear la EEPROM → enviar el comando de calibración (valor 128 a la dirección 40) → volver a bloquear la EEPROM.
-4. Verifique con la "Prueba de centro": los servos deben mantener su posición (moviéndose solo ligeramente), lo que confirma que la calibración se ha realizado correctamente.
+Los botones **Calibración de centro del brazo líder** / **Calibración de centro del brazo seguidor** de la barra superior abren el asistente de calibración de LeRobot. La ventana tiene dos columnas: a la izquierda un monitor en vivo (ID / Pos / control deslizante para los seis servos) y a la derecha la tabla de calibración y las acciones.
+
+1. Al conectar, el programa desactiva el par y restablece los servos: el desplazamiento de origen (homing offset) se pone a cero y los límites de ángulo se abren a `[0, 4095]` (equivalente a `reset_calibration` de LeRobot).
+2. Haga clic en **Iniciar registro del centro** — el botón se vuelve naranja y la columna "Valor central" empieza a **seguir en vivo la Pos de la izquierda**. Coloque el brazo en su centro estándar; cuando las lecturas sean estables, haga clic en **Finalizar registro del centro** para congelar los valores y escribirlos de vuelta en los servos (el archivo guarda el delta `centro − 2047`).
+3. Haga clic en **Registrar recorrido** — el botón se vuelve verde. **Mueva cada articulación de un límite al otro** (`wrist_roll` es una articulación de rotación continua con un recorrido fijo `[0,4095]`; **barra también el gripper**). Las columnas mín./máx. se actualizan en vivo. Haga clic en **Detener registro de recorrido** al terminar.
+4. Cuando las seis articulaciones estén completas, el programa **guarda el archivo de calibración automáticamente y sobrescribe cualquier archivo anterior con el mismo nombre**, y escribe los desplazamientos y límites de vuelta en la EEPROM del servo, de modo que LeRobot dejará de pedirle que calibre de nuevo.
+
+Ubicaciones de guardado (ID fijos):
+
+| Brazo | ID del archivo de calibración | Ruta |
+| --- | --- | --- |
+| Líder | `my_leader_arm` | `~/.cache/huggingface/lerobot/calibration/teleoperators/so_leader/my_leader_arm.json` |
+| Seguidor | `my_follower_arm` | `~/.cache/huggingface/lerobot/calibration/robots/so_follower/my_follower_arm.json` |
+
+> Si cierra el asistente antes de tiempo, se le preguntará si desea guardar el progreso actual; elegir Sí también sobrescribe el mismo archivo.
+> El botón **🎯 Centro** de cada servo sigue grabando la posición actual de ese servo como 2048 (persistida en la EEPROM); es una operación distinta de la calibración de todo el brazo descrita arriba.
+
+> ⚠️ **Barra ambos brazos sobre el mismo recorrido**: la teleoperación normaliza cada brazo según su propio recorrido registrado. Si una articulación se barre solo a medias en un brazo (por ejemplo, shoulder_lift registrado con 107°) mientras el otro registra 208°, el seguidor se mueve casi el doble que el líder y las posturas de reposo no coinciden. Tras calibrar, compare la anchura de los recorridos de ambos brazos y vuelva a registrar cualquier articulación que difiera mucho.
 
 ### 3. Prueba de centro
 
-1. Haga clic en **Prueba de centro del puerto X**.
+1. Haga clic en **Prueba de centro del brazo líder** / **Prueba de centro del brazo seguidor**.
 2. El programa activa el par y mueve todos los servos a 2048.
 3. Si un servo apenas se mueve de su posición actual, la calibración es correcta; si se mueve mucho, el valor de calibración no es fiable y hay que rehacerlo.
 
 ### 4. Desactivar motores (ajuste manual)
 
-- Haga clic en **Desactivar motores del puerto X** para desactivar el par de todos los servos de ese puerto, de modo que puedan girarse libremente a mano.
+- Haga clic en **Desactivar motores del brazo líder** / **Desactivar motores del brazo seguidor** para desactivar el par de todos los servos de ese puerto, de modo que puedan girarse libremente a mano.
 - Un servo concreto puede activarse o desactivarse en la pestaña **Control de un solo servo** mediante el interruptor de par situado bajo su control deslizante.
 
-### 5. Cambiar el ID de un servo
+### 5. Control de un solo servo (control deslizante / Pos)
+
+En la pestaña **🎚️ Control de un solo servo** cada servo en línea tiene una fila:
+
+- **Campo Pos**: muestra / acepta una posición objetivo (0–4095). **Editable**, vinculado en ambos sentidos con el control deslizante.
+- **Control deslizante**: al arrastrarlo se actualiza Pos en vivo; la orden de posición se envía **al soltar**, no de forma continua mientras se arrastra.
+- **Escribir en Pos**: Intro, salir del campo o los botones de incremento envían la orden inmediatamente; las pulsaciones no se envían dígito a dígito.
+- **L**: el último objetivo ordenado.
+- Mientras el servo se mueve, el control deslizante y Pos siguen la **posición real**; no se les toma el control mientras usted arrastra o escribe.
+- Cada fila dispone además de **⚡ Par**, **🎯 Centro** y **🧹 Borrar límites** para ese servo concreto.
+
+### 6. Cambiar el ID de un servo
 
 1. Abra la pestaña **🔬 Depurador FT**, conecte el puerto serie y escanee los servos.
 2. Seleccione el servo de destino, cambie su valor "ID del servo" (dirección 0x05) en la tabla de parámetros y haga clic en Escribir.
@@ -228,12 +258,12 @@ python -m src.tools.servo_remote_control
 
 > ⚠️ Antes de cambiar un ID, asegúrese siempre de que este sea el único servo del bus para evitar conflictos de ID.
 
-### 6. Cambiar la velocidad en baudios / restaurar los valores de fábrica
+### 7. Cambiar la velocidad en baudios / restaurar los valores de fábrica
 
 - **Cambiar la velocidad en baudios**: en el área "Velocidad en baudios / Restablecimiento de fábrica" de la pestaña Depurador FT, seleccione la nueva velocidad en baudios (38400 – 1000000 bps) y aplíquela. Tras la escritura, la velocidad en baudios del puerto serie cambia automáticamente y se verifica con un ping; si falla, se revierte automáticamente.
 - **Restaurar los valores de fábrica**: el servo vuelve a sus valores de fábrica (ID=1, velocidad en baudios=1000000); después deberá volver a escanear.
 
-### 7. Copia de seguridad y restauración de parámetros xdat
+### 8. Copia de seguridad y restauración de parámetros xdat
 
 En el área "Parámetros xdat (guardar solo la EEPROM)" de la pestaña Depurador FT:
 
@@ -242,15 +272,15 @@ En el área "Parámetros xdat (guardar solo la EEPROM)" de la pestaña Depurador
 3. **📂 Abrir xdat**: carga un archivo de copia de seguridad.
 4. **📤 Restaurar parámetros en el servo**: vuelve a escribir la copia de seguridad en la EEPROM del servo actual.
 
-### 8. Control remoto sincronizado de doble puerto
+### 9. Control remoto sincronizado de doble puerto
 
-> ⚠️ **Nota sobre la dirección: el puerto 1 controla el puerto 2.** El puerto 1 (maestro) solo lee los ángulos de los servos; el puerto 2 (esclavo) se acciona de forma sincronizada.
+> ⚠️ **Nota sobre la dirección: el brazo líder controla el brazo seguidor.** El brazo líder (maestro) solo lee los ángulos de los servos; el brazo seguidor (esclavo) se acciona de forma sincronizada.
 
-1. En la barra superior, haga clic en **🎮 Remoto** (el puerto 1 lee los ángulos → el puerto 2 acciona de forma sincronizada los servos con los mismos ID).
+1. En la barra superior, haga clic en **🎮 Remoto** (el brazo líder lee los ángulos → el brazo seguidor acciona de forma sincronizada los servos con los mismos ID).
 2. Los dos puertos deben usar ID de servo coincidentes; solo se sincronizan los servos presentes en ambos.
-3. Vuelva a hacer clic en el mismo botón para detenerlo; después, los hilos de escaneo de los paneles izquierdo y derecho se reanudan automáticamente.
+3. Vuelva a hacer clic en el mismo botón para detenerlo; después, los hilos de escaneo de ambos paneles se reanudan automáticamente.
 
-### 9. Calibración de LeRobot (línea de comandos)
+### 10. Calibración de LeRobot (línea de comandos)
 
 ```bash
 # Calibrar el brazo seguidor (se guarda en ~/.cache/huggingface/lerobot/calibration/robots/so_follower/)
@@ -260,7 +290,11 @@ python -m src.tools.lerobot_calibrate --arm-type follower
 python -m src.tools.lerobot_calibrate --arm-type leader
 ```
 
-Procedimiento: desactivar los servos → colocar cada articulación en el centro y registrar `homing_offset` → girar lentamente por todo el recorrido para registrar `range_min/max` (`wrist_roll` es una articulación de rotación continua cuyo recorrido está fijado en `[0,4095]`) → guardar el JSON.
+Procedimiento: desactivar los servos → restablecer los parámetros de calibración (desplazamiento a cero, límites liberados) → colocar cada articulación en el centro y registrar `homing_offset` → girar lentamente por todo el recorrido para registrar `range_min/max` (`wrist_roll` es una articulación de rotación continua cuyo recorrido está fijado en `[0,4095]`) → volver a escribir los parámetros en los servos → guardar el JSON.
+
+`homing_offset` es el **delta** de LeRobot (posición bruta del centro − 2047), no la posición bruta en sí.
+
+> Los botones **Calibración de centro del brazo líder / Calibración de centro del brazo seguidor** de la GUI ejecutan el mismo procedimiento y, al terminar, guardan automáticamente con los ID fijos (consulte la sección 2 anterior).
 
 Ir al centro desde un archivo de calibración:
 
@@ -282,6 +316,8 @@ python -m src.tools.run_calibration_middle <calibration_file.json> --mode zero
 8. **La calibración de centro es irreversible**: la escritura sobrescribe el desplazamiento original y no puede deshacerse. Anote la posición original antes de calibrar.
 9. **Riesgo al cambiar el ID**: si la escritura o la verificación fallan, el programa notifica un error y reanuda el escaneo, pero en casos extremos un servo puede quedar "perdido". Si eso ocurre, pruebe "Restaurar los valores de fábrica" (tras lo cual el ID vuelve a 1).
 10. **Problemas de codificación**: si los emoji aparecen mal en una consola de Windows, establezca `PYTHONIOENCODING=utf-8` antes de ejecutar las herramientas de línea de comandos. Linux/macOS usan UTF-8 nativo y normalmente no se ven afectados.
+11. **Mantenga coherentes los recorridos de ambos brazos**: la teleoperación normaliza cada brazo según su propio recorrido registrado. Si una articulación se barre solo a medias en un brazo mientras el otro se barre por completo, el movimiento del seguidor es notablemente mayor que el del líder y las posturas de reposo no coinciden. Compare la anchura de los recorridos de ambos brazos y vuelva a barrer cualquier articulación que difiera mucho.
+12. **Barra también el gripper**: el gripper no es una articulación de rotación continua. Si lo omite, su recorrido vuelve al valor predeterminado `[0,4095]` y su carrera de apertura/cierre será incorrecta.
 
 ---
 
@@ -295,6 +331,9 @@ python -m src.tools.run_calibration_middle <calibration_file.json> --mode zero
 | La temperatura sube demasiado rápido | Carga excesiva o una articulación bloqueada | Compruebe si hay bloqueos mecánicos y reduzca la velocidad/aceleración |
 | No se encuentra el servo tras cambiar su ID | Conflicto de ID o escritura fallida | Restaure los valores de fábrica y vuelva a escanear |
 | Control remoto desincronizado | Los ID de los dos puertos son distintos | Confirme que hay servos con los mismos ID en línea en los puertos maestro y esclavo |
+| Las posturas o el recorrido no coinciden durante la teleoperación | Los dos brazos registraron anchuras de recorrido muy distintas en alguna articulación | Vuelva a registrar esa articulación por todo su recorrido para que ambos brazos coincidan |
+| La carrera del gripper es incorrecta | El gripper nunca se barrió; su recorrido es el predeterminado `[0,4095]` | Vuelva a registrar y barra el gripper de límite a límite |
+| Pos no se actualiza en el asistente de calibración | El puerto está ocupado / un servo no responde | Cierre el programa que ocupa el puerto; confirme que los seis servos están en línea |
 
 ---
 
@@ -308,6 +347,8 @@ SO-ARM101-ServoController/
 │       ├── Windows.md
 │       ├── Linux.md
 │       └── macOS.md
+├── main.py                  # Punto de entrada unificado (GUI / subcomandos --run-tool)
+├── SO-ARM101-ServoController.spec   # Configuración de compilación en un solo archivo con PyInstaller
 ├── src/
 │   ├── gui/                  # Interfaz gráfica PySide6
 │   │   ├── factory_calibration_tool.py   # Herramienta principal (calibración de doble puerto + control remoto + cambio de idioma)
@@ -316,6 +357,9 @@ SO-ARM101-ServoController/
 │   │   ├── theme_utils.py                # Tema claro
 │   │   └── language_dialog.py            # Diálogo de selección de idioma
 │   ├── tools/                # Herramientas de línea de comandos
+│   ├── launcher.py           # Autodespacho en subproceso (llamadas a herramientas en el exe empaquetado)
+│   ├── calibration_math.py   # Conversión de homing_offset y codificación signo-magnitud
+│   ├── servo_eeprom.py       # Escritura de los parámetros de calibración de vuelta en la EEPROM
 │   ├── xdat_utils.py         # Lectura/escritura de archivos de parámetros xdat
 │   ├── i18n*.py / i18n_translations/     # Internacionalización chino/inglés
 │   ├── port_utils.py         # Detección de puertos serie

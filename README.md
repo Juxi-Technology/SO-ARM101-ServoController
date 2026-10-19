@@ -47,8 +47,14 @@ python -m venv .venv
 # Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
 python setup.py
-python -m src.gui.factory_calibration_tool
+python main.py          # or: python -m src.gui.factory_calibration_tool
 ```
+
+**Single-file build (Windows):** `pip install pyinstaller` then `pyinstaller -y SO-ARM101-ServoController.spec`;
+this produces `dist/SO-ARM101-ServoController.exe` (~46 MB) — no Python needed on the target machine. The same
+executable also hosts every CLI tool via `SO-ARM101-ServoController.exe --run-tool <tool> ...`
+(see the per-language guides for the list). PyInstaller does not cross-compile: build on the OS you
+want to target.
 
 On Linux, add your user to the `dialout` group first (`sudo usermod -a -G dialout $USER`, then log out and back in).
 

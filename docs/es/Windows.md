@@ -70,8 +70,12 @@ Ports (COM & LPT)
 ## 6. Iniciar la GUI
 
 ```bash
+python main.py
+# o
 python -m src.gui.factory_calibration_tool
 ```
+
+> **Opción sin instalación (Windows)**: haga doble clic en `dist\SO-ARM101-ServoController.exe`; la máquina de destino no necesita Python. Recompílelo con `pyinstaller -y SO-ARM101-ServoController.spec`.
 
 O especifique los puertos (si están ocupados):
 
@@ -89,16 +93,25 @@ python -m src.gui.factory_calibration_tool --list-ports
 
 ### 7.1 Pestaña de calibración de servos
 
-1. Seleccione Puerto1/Puerto2 en la barra superior → escanee los servos automáticamente (ID 1-6)
+1. Seleccione el puerto del brazo líder/seguidor en la barra superior → los servos se escanean automáticamente (ID 1-6).
 2. Botones habituales:
-   - **Calibración de centro**: establece la posición actual como centro 2048
-   - **Prueba de centro**: activa el par y mueve al centro para verificar
-   - **Desactivar servos**: desactiva el par para poder girarlos a mano
+   - **Calibración de centro del brazo líder/seguidor**: abre el asistente de calibración de LeRobot
+     - Columna izquierda: monitor en vivo de los seis servos (ID / Pos / control deslizante)
+     - **Iniciar registro del centro** (se vuelve naranja) → coloque el brazo en su centro → **Finalizar registro del centro**
+     - **Registrar recorrido** (se vuelve verde) → mueva cada articulación de límite a límite, incluido el gripper → vuelva a hacer clic para detener
+     - Cuando las seis articulaciones estén completas, el archivo de calibración se guarda automáticamente y sobrescribe el anterior, y los desplazamientos/límites se escriben de vuelta en la EEPROM del servo
+   - **Prueba de centro del brazo líder/seguidor**: activa el par y mueve al centro para verificar
+   - **Desactivar motores del brazo líder/seguidor**: desactiva el par para poder moverlo a mano
+
+> ⚠️ Barra ambos brazos sobre el mismo recorrido; de lo contrario, el movimiento del seguidor no coincidirá con el del líder durante la teleoperación.
 
 ### 7.2 Pestaña de control de un solo servo
 
-- Arrastre el control deslizante → el servo se mueve a la posición objetivo al soltarlo
-- El interruptor de par controla cada servo individualmente
+- Cada fila: ID / Pos / control deslizante / L (objetivo)
+- **Pos y el control deslizante están vinculados en ambos sentidos**: al arrastrar el control deslizante se actualiza Pos; al escribir en Pos se mueve el control deslizante y se envía la orden inmediatamente
+- La orden se envía al soltar el control deslizante, no de forma continua mientras se arrastra
+- Mientras el servo se mueve, el control deslizante y Pos siguen la posición real
+- ⚡ Par / 🎯 Centro / 🧹 Borrar límites actúan sobre ese servo concreto
 
 ### 7.3 Pestaña del depurador FT
 
@@ -118,9 +131,9 @@ python -m src.gui.factory_calibration_tool --list-ports
 
 ### 7.4 Control remoto
 
-> ⚠️ **Dirección: el puerto 1 controla el puerto 2**. El puerto 1 (maestro) solo lee los ángulos de los servos, el puerto 2 (esclavo) se sincroniza. Requiere ID de servo coincidentes en ambos puertos.
+> ⚠️ **Dirección: el brazo líder controla el brazo seguidor**. El brazo líder (maestro) solo lee los ángulos de los servos, el brazo seguidor (esclavo) se sincroniza. Requiere ID de servo coincidentes en ambos puertos.
 
-- Botón `🎮 Remoto` de la barra superior: el puerto 1 lee → el puerto 2 controla (servos con el mismo ID)
+- Botón `🎮 Remoto` de la barra superior: el líder lee → el seguidor controla (servos con el mismo ID)
 - Vuelva a hacer clic para detener el control remoto
 
 ## 8. Solución de problemas

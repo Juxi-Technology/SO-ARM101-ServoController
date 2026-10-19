@@ -70,8 +70,12 @@ Portas (COM e LPT)
 ## 6. Iniciar a GUI
 
 ```bash
+python main.py
+# ou
 python -m src.gui.factory_calibration_tool
 ```
+
+> **Opção sem instalação (Windows)**: clique duas vezes em `dist\SO-ARM101-ServoController.exe`; a máquina de destino não precisa de Python. Recompile com `pyinstaller -y SO-ARM101-ServoController.spec`.
 
 Ou especifique as portas (se estiverem ocupadas):
 
@@ -89,16 +93,25 @@ python -m src.gui.factory_calibration_tool --list-ports
 
 ### 7.1 Aba de Calibração de Servos
 
-1. Selecione Port1/Port2 na barra superior → varredura automática dos servos (ID 1-6)
+1. Selecione a porta do braço líder/seguidor na barra superior → os servos são varridos automaticamente (ID 1-6).
 2. Botões comuns:
-   - **Calibração do Meio**: define a posição atual como o centro 2048
-   - **Teste do Meio**: habilita o torque e move até o centro para verificar
-   - **Desabilitar Servos**: desliga o torque para rotação manual
+   - **Calibração Central do Braço Líder/Seguidor**: abre o assistente de calibração LeRobot
+     - Coluna esquerda: monitor ao vivo dos seis servos (ID / Pos / controle deslizante)
+     - **Iniciar gravação do centro** (fica laranja) → posicione o braço no centro → **Concluir gravação do centro**
+     - **Registrar faixa** (fica verde) → percorra cada junta de um limite ao outro, incluindo a garra → clique novamente para parar
+     - Quando as seis juntas estiverem completas, o arquivo de calibração é salvo automaticamente e sobrescreve o anterior, e os offsets/limites são gravados de volta na EEPROM dos servos
+   - **Teste Central do Braço Líder/Seguidor**: habilita o torque e move até o centro para verificar
+   - **Desabilitar Motores do Braço Líder/Seguidor**: desabilita o torque para movimento manual
+
+> ⚠️ Percorra os dois braços na mesma faixa de movimento, caso contrário o movimento do seguidor não vai coincidir com o do líder durante a teleoperação.
 
 ### 7.2 Aba de Controle de Servo Único
 
-- Arraste o controle deslizante → o servo se move até a posição alvo ao soltar
-- A chave de torque controla servos individuais
+- Cada linha: ID / Pos / controle deslizante / L (alvo)
+- **Pos e o controle deslizante são vinculados nos dois sentidos**: arrastar o controle deslizante atualiza o Pos; digitar em Pos move o controle deslizante e envia o comando imediatamente
+- O comando é enviado ao soltar o controle deslizante, não continuamente durante o arraste
+- Enquanto o servo se move, o controle deslizante e o Pos acompanham a posição real
+- ⚡ Torque / 🎯 Centro / 🧹 Limpar limites atuam sobre esse servo individual
 
 ### 7.3 Aba do Depurador FT
 
@@ -118,9 +131,9 @@ python -m src.gui.factory_calibration_tool --list-ports
 
 ### 7.4 Controle Remoto
 
-> ⚠️ **Direção: a Porta1 controla a Porta2**. A Porta1 (mestre) apenas lê os ângulos dos servos, a Porta2 (escrava) é sincronizada. Requer IDs de servo correspondentes nas duas portas.
+> ⚠️ **Direção: o braço líder controla o braço seguidor**. O braço líder (mestre) apenas lê os ângulos dos servos; o braço seguidor (escravo) é sincronizado. Requer IDs de servo correspondentes nas duas portas.
 
-- Botão `🎮 Remoto` na barra superior: a Porta1 lê → a Porta2 controla (servos com o mesmo ID)
+- Botão `🎮 Remoto` na barra superior: o líder lê → o seguidor controla (servos com o mesmo ID)
 - Clique novamente para parar o controle remoto
 
 ## 8. Solução de Problemas

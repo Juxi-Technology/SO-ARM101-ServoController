@@ -1,8 +1,22 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""
-LeRobot 校准向导对话框
-在 GUI 上引导用户完成整臂校准，实时显示每个舵机的当前位置、中位值、范围
+"""LeRobot 校准向导（整臂一次校准）
+
+界面分左右两栏：
+
+* 左：仿照「单舵机控制」的实时监视 —— ID / Pos / 滑动条 / L（L 显示已记录的中位值）
+* 右：6 个舵机的中位值、最小值、最大值、状态表格 + 记录按钮 + 校准文件 ID + 保存
+
+流程：
+
+1. 连接后先复位（偏移清零、限位放开到 [0,4095]），与 LeRobot 的 reset_calibration 一致；
+   这样读到的是「未加偏移」的原始位置，算出的 homing_offset 才和 LeRobot 同口径。
+2. 把机械臂摆到中位 → 点【记录中位值】：把左侧 6 个 Pos 一次记成中位，
+   并把偏移写回舵机（增量 = 中位原始位置 − 2047）。
+3. 点【记录运动范围】（按钮变绿）→ 依次转动各关节 →
+   后台读取线程实时刷新每个舵机的 min/max；再点一次停止。
+4. 全部完成后自动保存（主界面调用时），也可手动【保存校准文件】。
+   保存时把偏移与限位写回 EEPROM，并落一份 LeRobot 可直接使用的 JSON。
 """
 
 import sys
@@ -10,6 +24,8 @@ import os
 import time
 import json
 import platform
+import contextlib
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -20,8 +36,8 @@ try:
     from PySide6.QtWidgets import (
         QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout,
         QPushButton, QLabel, QTableWidget, QTableWidgetItem, QHeaderView,
-        QMessageBox, QProgressBar, QGroupBox, QFormLayout, QLineEdit,
-        QComboBox, QDialogButtonBox, QFileDialog
+        QMessageBox, QGroupBox, QFormLayout, QLineEdit, QGridLayout,
+        QSpinBox, QSlider, QAbstractSpinBox, QAbstractItemView
     )
     from PySide6.QtCore import Qt, QTimer, Signal, QObject, QThread
     from PySide6.QtGui import QColor, QFont
@@ -31,16 +47,22 @@ except ImportError as e:
 
 try:
     from scservo_sdk.port_handler import PortHandler
-    from scservo_sdk.sms_sts import sms_sts
+    from scservo_sdk.sms_sts import sms_sts, SMS_STS_OFS_L
     from scservo_sdk.scservo_def import COMM_SUCCESS
 except ImportError as e:
     print(f"❌ 无法导入 SCServo SDK: {e}")
     sys.exit(1)
 
 try:
+    from src import servo_eeprom
     from src.calibration_manager import CalibrationManager, JOINT_NAME_MAP
+    from src.calibration_math import (
+        MAX_RES,
+        encode_homing_offset,
+        homing_offset_from_position,
+    )
 except ImportError:
-    print("❌ 无法导入 calibration_manager")
+    print("❌ 无法导入 calibration_manager / calibration_math / servo_eeprom")
     sys.exit(1)
 
 try:
@@ -76,7 +98,7 @@ ID_TO_JOINT = {
     6: "gripper",
 }
 
-# 连续旋转关节
+# 连续旋转关节：范围固定 [0, 4095]
 CONTINUOUS_JOINTS = {"wrist_roll"}
 
 
@@ -93,7 +115,6 @@ def get_chinese_font(size=10, bold=False):
     elif system == "Darwin":
         family = "PingFang SC"
     else:
-        # Linux / Ubuntu 等
         family = "Noto Sans CJK SC"
 
     font = QFont(family, size)
@@ -104,36 +125,37 @@ def get_chinese_font(size=10, bold=False):
 
 
 class PositionReader(QObject):
-    """后台位置读取线程"""
-    positions_updated = Signal(dict)  # {servo_id: position}
-    error_occurred = Signal(str)
+    """后台位置读取线程
 
-    def __init__(self, servo_handler, servo_ids: List[int]):
+    io_lock 用来和界面线程串行化串口收发：PortHandler 不是线程安全的，
+    两边同时收发会互相吃掉应答包（表现为读数不刷新、写命令"没生效"）。
+    """
+    # 用 object 而不是 dict：PySide6 跨线程传 dict 时会丢内容（界面收到空字典），
+    # 原项目 ServoWorker 的 positions_updated 也是这么绕开的
+    positions_updated = Signal(object)  # {servo_id: position}
+
+    def __init__(self, servo_handler, servo_ids: List[int], io_lock=None):
         super().__init__()
         self.servo_handler = servo_handler
         self.servo_ids = servo_ids
+        self.io_lock = io_lock
         self.running = False
-        self.error_counts = {sid: 0 for sid in servo_ids}
 
     def start_reading(self):
         self.running = True
+        ctx = self.io_lock if self.io_lock is not None else contextlib.nullcontext()
         while self.running:
             positions = {}
-            for servo_id in self.servo_ids:
-                try:
-                    pos, result, error = self.servo_handler.ReadPos(servo_id)
-                    if result == COMM_SUCCESS:
-                        positions[servo_id] = pos
-                        self.error_counts[servo_id] = 0
-                    else:
-                        self.error_counts[servo_id] += 1
-                        if self.error_counts[servo_id] <= 5:
-                            print(tr("[DEBUG] 读取 ID{} 失败: result={}, error={}").format(servo_id, result, error))
-                except Exception as e:
-                    self.error_counts[servo_id] += 1
-                    if self.error_counts[servo_id] <= 5:
+            with ctx:
+                for servo_id in self.servo_ids:
+                    try:
+                        pos, result, _error = self.servo_handler.ReadPos(servo_id)
+                        if result == COMM_SUCCESS:
+                            positions[servo_id] = pos
+                    except Exception as e:
                         print(tr("[DEBUG] 读取 ID{} 异常: {}").format(servo_id, e))
-            self.positions_updated.emit(positions)
+            if positions:
+                self.positions_updated.emit(positions)
             time.sleep(0.05)  # 20Hz
 
     def stop(self):
@@ -142,6 +164,7 @@ class PositionReader(QObject):
 
 class ReaderThread(QThread):
     """Qt 线程包装器"""
+
     def __init__(self, reader: PositionReader):
         super().__init__()
         self.reader = reader
@@ -157,312 +180,246 @@ class ReaderThread(QThread):
 class CalibrationWizard(QDialog):
     """LeRobot 校准向导"""
 
-    def __init__(self, port_name: str, arm_type: str = "follower", preload_file: str = None, parent=None):
+    def __init__(self, port_name: str, arm_type: str = "follower", fixed_id: str = None,
+                 lock_id: bool = False, auto_save: bool = False, parent=None):
         super().__init__(parent)
         self.port_name = port_name
         self.arm_type = arm_type
-        self.preload_file = preload_file
+        self.fixed_id = fixed_id
+        self.lock_id = lock_id
+        self.auto_save = auto_save
+        self._closing = False
+
         title = tr("LeRobot 校准向导 - {}").format(port_name)
-        if preload_file:
-            title += tr(" (基于现有文件)")
         self.setWindowTitle(title)
-        self.setMinimumSize(900, 650)
+        self.setMinimumSize(1040, 620)
         self.setFont(get_chinese_font(10))
 
-        # 串口对象
+        # 串口
+        self._io_lock = threading.Lock()
         self.port_handler = None
         self.servo_handler = None
+        self.servo_ids: List[int] = []
 
-        # 校准数据
-        self.joints: List[Dict] = []
-        self.current_joint_index = 0
+        # 实时位置与校准数据
+        self.latest: Dict[int, int] = {}
+        self.state = {
+            sid: {"center": None, "min": None, "max": None} for sid in ID_TO_JOINT
+        }
         self.is_recording = False
+        self.center_recording = False
+        self._toggle_guard = False
+
+        # 保存结果（供调用方读取）
+        self.saved_path = None
+        self.saved_id = None
 
         # 后台读取
         self.position_reader = None
         self.reader_thread = None
 
+        self.connected = False
         self.init_ui()
-        self.connect_port()
+        self.connected = self.connect_port()
+
+    # ---------------- 界面 ----------------
 
     def init_ui(self):
-        """初始化界面"""
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(15)
-        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(16, 16, 16, 16)
 
-        # 标题
-        title = QLabel(tr("🦾 LeRobot 校准向导 - {}").format(tr("领导臂") if self.arm_type == 'leader' else tr("从动臂")))
-        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #1a237e;")
+        title = QLabel(tr("🦾 LeRobot 校准向导 - {}").format(
+            tr("主动臂") if self.arm_type == "leader" else tr("从动臂")))
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: #1a237e;")
         title.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(title)
 
-        # 状态信息
         self.status_label = QLabel(tr("串口: {} | 状态: 初始化中...").format(self.port_name))
-        self.status_label.setStyleSheet("font-size: 12px; color: #546e7a;")
+        self.status_label.setStyleSheet("font-size: 11px; color: #546e7a;")
+        self.status_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(self.status_label)
 
-        # 主内容区：左侧表格 + 右侧操作
-        content_layout = QHBoxLayout()
-        content_layout.setSpacing(15)
+        content = QHBoxLayout()
+        content.setSpacing(14)
+        content.addWidget(self._build_monitor_group(), 3)
+        content.addWidget(self._build_data_group(), 4)
+        main_layout.addLayout(content, 1)
 
-        # 左侧：关节数据表格
-        table_group = QGroupBox(tr("📋 关节校准数据"))
-        table_layout = QVBoxLayout(table_group)
-
-        self.joints_table = QTableWidget(6, 6)
-        self.joints_table.setHorizontalHeaderLabels([
-            "ID", tr("当前位置"), tr("中位值"), tr("最小值"), tr("最大值"), tr("状态")
-        ])
-        header = self.joints_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.Stretch)
-        # 让数值列稍微宽一点
-        header.setSectionResizeMode(0, QHeaderView.Fixed)
-        self.joints_table.setColumnWidth(0, 50)
-        self.joints_table.setAlternatingRowColors(True)
-        self.joints_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.joints_table.verticalHeader().setVisible(False)
-        self.joints_table.setFont(get_chinese_font(10))
-
-        # 初始化行
-        for i, servo_id in enumerate(range(1, 7)):
-            joint_name = ID_TO_JOINT.get(servo_id, f"joint_{servo_id}")
-            # 校准向导界面使用纯中文名称，去掉英文对照
-            display_name = tr(JOINT_NAME_MAP.get(joint_name, joint_name).split(" / ")[0])
-
-            self.joints_table.setItem(i, 0, self._create_item(str(servo_id), align=Qt.AlignCenter))
-            self.joints_table.setItem(i, 1, self._create_item("--", align=Qt.AlignCenter))
-            self.joints_table.setItem(i, 2, self._create_item("--", align=Qt.AlignCenter))
-            self.joints_table.setItem(i, 3, self._create_item("--", align=Qt.AlignCenter))
-            self.joints_table.setItem(i, 4, self._create_item("--", align=Qt.AlignCenter))
-            self.joints_table.setItem(i, 5, self._create_item(tr("未校准"), color="#dc3545"))
-
-            self.joints.append({
-                "id": servo_id,
-                "name": joint_name,
-                "display_name": display_name,
-                "current_pos": None,
-                "homing_offset": None,
-                "range_min": None,
-                "range_max": None,
-                "status": "pending",  # pending, homing_done, done
-            })
-
-        self.joints_table.itemSelectionChanged.connect(self.on_selection_changed)
-        self.joints_table.selectRow(0)
-
-        table_layout.addWidget(self.joints_table)
-        content_layout.addWidget(table_group, stretch=2)
-
-        # 右侧：操作面板
-        control_group = QGroupBox(tr("🎮 操作面板"))
-        control_layout = QVBoxLayout(control_group)
-        control_layout.setSpacing(15)
-
-        # 当前关节显示
-        self.current_joint_label = QLabel(tr("当前关节: ID1 - 肩部平转"))
-        self.current_joint_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #37474f;")
-        control_layout.addWidget(self.current_joint_label)
-
-        # 当前位置大字显示
-        self.current_pos_label = QLabel(tr("当前位置: --"))
-        self.current_pos_label.setStyleSheet(
-            "font-size: 36px; font-weight: bold; color: #5c6bc0; "
-            "background-color: #eef1f5; padding: 15px; border-radius: 8px;"
-        )
-        self.current_pos_label.setAlignment(Qt.AlignCenter)
-        self.current_pos_label.setMinimumHeight(80)
-        control_layout.addWidget(self.current_pos_label)
-
-        # 步骤说明
-        self.instruction_label = QLabel(
-            tr("步骤 1/2：请将当前关节移动到运动范围的中间位置，\n然后点击【记录中位值】按钮。")
-        )
-        self.instruction_label.setStyleSheet(
-            "font-size: 13px; color: #3949ab; background-color: #e3f2fd; "
-            "padding: 12px; border-radius: 6px;"
-        )
-        self.instruction_label.setWordWrap(True)
-        self.instruction_label.setMinimumHeight(80)
-        control_layout.addWidget(self.instruction_label)
-
-        # 记录中位按钮
-        self.record_home_btn = QPushButton(tr("✅ 记录中位值"))
-        self.record_home_btn.setStyleSheet(self._button_style("#26a69a"))
-        self.record_home_btn.setMinimumHeight(45)
-        self.record_home_btn.clicked.connect(self.record_homing)
-        control_layout.addWidget(self.record_home_btn)
-
-        # 记录范围按钮
-        self.record_range_layout = QHBoxLayout()
-        self.start_range_btn = QPushButton(tr("▶ 开始记录范围"))
-        self.start_range_btn.setStyleSheet(self._button_style("#5c6bc0"))
-        self.start_range_btn.setMinimumHeight(45)
-        self.start_range_btn.clicked.connect(self.start_range_recording)
-
-        self.stop_range_btn = QPushButton(tr("⏹ 停止记录范围"))
-        self.stop_range_btn.setStyleSheet(self._button_style("#dc3545"))
-        self.stop_range_btn.setMinimumHeight(45)
-        self.stop_range_btn.setEnabled(False)
-        self.stop_range_btn.clicked.connect(self.stop_range_recording)
-
-        self.record_range_layout.addWidget(self.start_range_btn)
-        self.record_range_layout.addWidget(self.stop_range_btn)
-        control_layout.addLayout(self.record_range_layout)
-
-        # 导航按钮
-        nav_layout = QHBoxLayout()
-        self.prev_btn = QPushButton(tr("◀ 上一个关节"))
-        self.prev_btn.setStyleSheet(self._button_style("#546e7a"))
-        self.prev_btn.clicked.connect(self.prev_joint)
-
-        self.next_btn = QPushButton(tr("下一个关节 ▶"))
-        self.next_btn.setStyleSheet(self._button_style("#26a69a"))
-        self.next_btn.clicked.connect(self.next_joint)
-
-        nav_layout.addWidget(self.prev_btn)
-        nav_layout.addWidget(self.next_btn)
-        control_layout.addLayout(nav_layout)
-
-        control_layout.addStretch()
-
-        # 保存设置
-        save_group = QGroupBox(tr("💾 保存设置"))
-        save_group.setMinimumHeight(120)
-        save_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
-                color: #263238;
-                border: 2px solid #6f42c1;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding-top: 10px;
-                background-color: #fafbfc;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 8px;
-                padding: 0 5px;
-                color: #263238;
-            }
-            QLabel {
-                color: #263238;
-                font-size: 13px;
-                font-weight: bold;
-            }
-        """)
-        save_layout = QFormLayout(save_group)
-        save_layout.setSpacing(10)
-        save_layout.setContentsMargins(15, 20, 15, 15)
-
-        self.id_input = QLineEdit()
-        self.id_input.setMinimumHeight(35)
-        self.id_input.setMinimumWidth(220)
-        self.id_input.setFont(get_chinese_font(12))
-        self.id_input.setStyleSheet("""
-            QLineEdit {
-                color: #263238;
-                background-color: #ffffff;
-                border: 2px solid #cfd4dc;
-                border-radius: 5px;
-                padding: 5px 10px;
-                font-size: 13px;
-            }
-            QLineEdit:focus {
-                border: 2px solid #6f42c1;
-                background-color: #ffffff;
-            }
-        """)
-        default_id = "my_awesome_leader_arm" if self.arm_type == "leader" else "my_awesome_follower_arm"
-        self.id_input.setText(default_id)
-        save_layout.addRow(tr("校准文件 ID:"), self.id_input)
-
-        control_layout.addWidget(save_group)
-
-        # 保存按钮
-        self.save_btn = QPushButton(tr("💾 保存校准文件"))
-        self.save_btn.setStyleSheet(self._button_style("#6f42c1"))
-        self.save_btn.setMinimumHeight(55)
-        self.save_btn.setFont(get_chinese_font(12, bold=True))
-        self.save_btn.clicked.connect(self.save_calibration)
-        control_layout.addWidget(self.save_btn)
-
-        content_layout.addWidget(control_group, stretch=1)
-        main_layout.addLayout(content_layout)
-
-        # 底部按钮
-        bottom_layout = QHBoxLayout()
+        bottom = QHBoxLayout()
+        bottom.addStretch()
         self.disconnect_btn = QPushButton(tr("🔌 断开连接"))
-        self.disconnect_btn.setStyleSheet(self._button_style("#546e7a"))
         self.disconnect_btn.clicked.connect(self.disconnect_and_close)
-        bottom_layout.addWidget(self.disconnect_btn)
-
-        bottom_layout.addStretch()
+        bottom.addWidget(self.disconnect_btn)
 
         self.close_btn = QPushButton(tr("关闭"))
-        self.close_btn.setStyleSheet(self._button_style("#546e7a"))
         self.close_btn.clicked.connect(self.close)
-        bottom_layout.addWidget(self.close_btn)
+        bottom.addWidget(self.close_btn)
+        main_layout.addLayout(bottom)
 
-        main_layout.addLayout(bottom_layout)
+        # 记录过程中按 10Hz 刷新表格（数据本身 20Hz 更新）
+        self.range_timer = QTimer(self)
+        self.range_timer.timeout.connect(self.refresh_table)
 
-        # 定时器用于刷新 UI
-        self.ui_timer = QTimer()
-        self.ui_timer.timeout.connect(self.update_ui)
-        self.ui_timer.start(50)  # 20Hz UI 刷新
+        self.refresh_table()
+        self._update_buttons()
 
-        # 范围记录专用定时器（高频读取当前关节）
-        self.range_recording_timer = QTimer()
-        self.range_recording_timer.timeout.connect(self._record_current_position)
+    def _build_monitor_group(self) -> QWidget:
+        """左栏：仿照「单舵机控制」的实时监视"""
+        group = QGroupBox(tr("实时位置"))
+        grid = QGridLayout(group)
+        grid.setSpacing(8)
+        grid.setColumnStretch(2, 1)
 
-    def _create_item(self, text, align=None, color=None):
-        """创建表格项"""
-        item = QTableWidgetItem(text)
-        if align:
-            item.setTextAlignment(align)
-        # 显式设置前景/背景色，避免在 Windows 深色主题下继承黑色背景导致文字看不见
-        if color:
-            item.setForeground(QColor(color))
-        else:
-            item.setForeground(QColor("#263238"))
-        item.setBackground(QColor("#ffffff"))
-        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-        return item
+        self.pos_inputs: Dict[int, QSpinBox] = {}
+        self.sliders: Dict[int, QSlider] = {}
 
-    def _button_style(self, color: str) -> str:
-        """生成按钮样式"""
-        return f"""
-            QPushButton {{
-                background-color: {color};
+        for row, sid in enumerate(sorted(ID_TO_JOINT)):
+            id_label = QLabel(f"ID{sid}")
+            id_label.setStyleSheet("font-weight: bold; font-size: 12px;")
+            id_label.setFixedWidth(38)
+            grid.addWidget(id_label, row, 0)
+
+            pos_input = QSpinBox()
+            pos_input.setRange(0, MAX_RES)
+            pos_input.setValue(0)
+            pos_input.setPrefix("Pos: ")
+            pos_input.setReadOnly(True)
+            pos_input.setButtonSymbols(QAbstractSpinBox.NoButtons)
+            pos_input.setMinimumWidth(95)
+            pos_input.setStyleSheet("font-size: 11px;")
+            self.pos_inputs[sid] = pos_input
+            grid.addWidget(pos_input, row, 1)
+
+            slider = QSlider(Qt.Horizontal)
+            slider.setRange(0, MAX_RES)
+            slider.setValue(2048)
+            # 只看不拖：保持正常配色，但忽略鼠标操作
+            slider.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            slider.setStyleSheet("""
+                QSlider::groove:horizontal {
+                    border: 1px solid #bbb;
+                    height: 8px;
+                    background: #eef1f5;
+                    border-radius: 4px;
+                }
+                QSlider::handle:horizontal {
+                    background: #5c6bc0;
+                    border: 1px solid #3f51b5;
+                    width: 18px;
+                    margin: -5px 0;
+                    border-radius: 4px;
+                }
+                QSlider::sub-page:horizontal {
+                    background: #5c6bc0;
+                    border-radius: 4px;
+                }
+            """)
+            self.sliders[sid] = slider
+            grid.addWidget(slider, row, 2)
+
+        return group
+
+    def _build_data_group(self) -> QWidget:
+        """右栏：校准表格 + 记录按钮 + 保存"""
+        group = QGroupBox(tr("校准数据"))
+        layout = QVBoxLayout(group)
+        layout.setSpacing(10)
+
+        self.table = QTableWidget(len(ID_TO_JOINT), 5)
+        self.table.setHorizontalHeaderLabels(
+            [tr("ID"), tr("中位值"), tr("最小值"), tr("最大值"), tr("状态")])
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionMode(QAbstractItemView.NoSelection)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        for row, sid in enumerate(sorted(ID_TO_JOINT)):
+            self.table.setItem(row, 0, QTableWidgetItem(f"ID{sid}"))
+            for col in range(1, 5):
+                self.table.setItem(row, col, QTableWidgetItem("--"))
+        self.table.setMinimumHeight(210)
+        layout.addWidget(self.table)
+
+        btn_row = QHBoxLayout()
+        self.record_center_btn = QPushButton(tr("开始中位值记录"))
+        self.record_center_btn.setCheckable(True)
+        self.record_center_btn.setMinimumHeight(42)
+        self.record_center_btn.setFont(get_chinese_font(11, bold=True))
+        self.record_center_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #fff3e0;
+                color: #e65100;
+                border: 1px solid #ffb74d;
+                border-radius: 6px;
+                padding: 0 14px;
+            }
+            QPushButton:hover { background-color: #ffe0b2; }
+            QPushButton:checked {
+                background-color: #ef6c00;
+                color: white;
+                border: 1px solid #e65100;
+            }
+        """)
+        self.record_center_btn.toggled.connect(self.on_center_toggled)
+        btn_row.addWidget(self.record_center_btn)
+
+        self.record_range_btn = QPushButton(tr("记录运动范围"))
+        self.record_range_btn.setCheckable(True)
+        self.record_range_btn.setMinimumHeight(42)
+        self.record_range_btn.setFont(get_chinese_font(11, bold=True))
+        self.record_range_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #e8eaf6;
+                color: #283593;
+                border: 1px solid #9fa8da;
+                border-radius: 6px;
+                padding: 0 14px;
+            }
+            QPushButton:hover { background-color: #c5cae9; }
+            QPushButton:checked {
+                background-color: #2e7d32;
+                color: white;
+                border: 1px solid #1b5e20;
+            }
+        """)
+        self.record_range_btn.toggled.connect(self.on_range_toggled)
+        btn_row.addWidget(self.record_range_btn)
+        layout.addLayout(btn_row)
+
+        form = QFormLayout()
+        form.setSpacing(8)
+        self.id_input = QLineEdit()
+        self.id_input.setMinimumHeight(32)
+        default_id = self.fixed_id or (
+            "my_leader_arm" if self.arm_type == "leader" else "my_follower_arm")
+        self.id_input.setText(default_id)
+        if self.fixed_id and self.lock_id:
+            self.id_input.setReadOnly(True)
+        form.addRow(tr("校准文件 ID:"), self.id_input)
+        layout.addLayout(form)
+
+        self.save_btn = QPushButton(tr("💾 保存校准文件"))
+        self.save_btn.setMinimumHeight(46)
+        self.save_btn.setFont(get_chinese_font(11, bold=True))
+        self.save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6f42c1;
                 color: white;
                 border: none;
-                padding: 8px 15px;
-                border-radius: 5px;
-                font-size: 13px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {self._darken_color(color)};
-            }}
-            QPushButton:pressed {{
-                background-color: {self._darken_color(color, 0.7)};
-            }}
-            QPushButton:disabled {{
-                background-color: #546e7a;
-            }}
-        """
+                border-radius: 6px;
+            }
+            QPushButton:hover { background-color: #5a34a8; }
+            QPushButton:disabled { background-color: #b39ddb; }
+        """)
+        self.save_btn.clicked.connect(self.save_calibration)
+        layout.addWidget(self.save_btn)
 
-    def _darken_color(self, hex_color: str, factor: float = 0.85) -> str:
-        """简单加深颜色"""
-        hex_color = hex_color.lstrip('#')
-        r = int(int(hex_color[0:2], 16) * factor)
-        g = int(int(hex_color[2:4], 16) * factor)
-        b = int(int(hex_color[4:6], 16) * factor)
-        return f"#{max(0, r):02x}{max(0, g):02x}{max(0, b):02x}"
+        return group
+
+    # ---------------- 串口 ----------------
 
     def connect_port(self):
-        """连接串口"""
+        """连接串口、扫描舵机、复位校准参数、启动读取线程"""
         try:
             self.port_handler = PortHandler(self.port_name)
             if not self.port_handler.openPort():
@@ -475,453 +432,368 @@ class CalibrationWizard(QDialog):
 
             self.servo_handler = sms_sts(self.port_handler)
 
-            # 扫描舵机
             found_servos = self.scan_servos()
             if not found_servos:
                 QMessageBox.critical(self, tr("错误"), tr("未发现舵机"))
                 self.port_handler.closePort()
                 return False
 
-            # 过滤出 1-6
             self.servo_ids = [sid for sid in found_servos if sid in ID_TO_JOINT]
             if not self.servo_ids:
-                QMessageBox.critical(self, tr("错误"), tr("未发现 SoARM 10x 标准关节（ID 1-6）"))
+                QMessageBox.critical(
+                    self, tr("错误"), tr("未发现 SoARM 10x 标准关节（ID 1-6）"))
                 self.port_handler.closePort()
                 return False
 
-            # 检查缺失的标准关节
-            expected_ids = set(ID_TO_JOINT.keys())
-            found_ids = set(self.servo_ids)
-            missing_ids = expected_ids - found_ids
+            missing_ids = set(ID_TO_JOINT) - set(self.servo_ids)
             if missing_ids:
-                missing_names = [f"ID{sid}" for sid in sorted(missing_ids)]
+                self.state.update({sid: {"center": None, "min": None, "max": None}
+                                   for sid in missing_ids})
                 QMessageBox.warning(
                     self,
                     tr("警告"),
-                    tr("以下标准关节未被发现：{}\n这些关节将无法校准，请检查连接。").format(', '.join(missing_names))
+                    tr("以下标准关节未被发现：{}\n这些关节将无法校准，请检查连接。").format(
+                        ', '.join(f"ID{sid}" for sid in sorted(missing_ids))),
                 )
-                # 标记缺失关节为未连接
-                for sid in missing_ids:
-                    self.joints[sid - 1]["status"] = "disconnected"
 
-            # 失能所有舵机
+            # 失能力矩，方便手动摆位
             self.set_torque(False)
 
-            # 启动位置读取线程
-            self.position_reader = PositionReader(self.servo_handler, self.servo_ids)
+            # 偏移清零 + 限位放开，等价 LeRobot 的 reset_calibration
+            reset_failures = servo_eeprom.reset_calibration(
+                self.servo_handler, self.servo_ids, lock=self._io_lock)
+            if reset_failures:
+                QMessageBox.warning(
+                    self,
+                    tr("警告"),
+                    tr("以下舵机的校准复位失败，本次校准结果可能不准：{}").format(
+                        ', '.join("ID{}".format(sid) for sid, _ in reset_failures)),
+                )
+
+            # 后台读取（与界面线程共用一把串口锁）
+            self.position_reader = PositionReader(
+                self.servo_handler, self.servo_ids, io_lock=self._io_lock)
             self.position_reader.positions_updated.connect(self.on_positions_updated)
             self.reader_thread = ReaderThread(self.position_reader)
             self.reader_thread.start()
 
+            # 先把状态置位，_update_buttons 依赖它；否则这里会把按钮判成离线禁用
+            self.connected = True
             self.status_label.setText(
-                tr("串口: {} | 已连接 | 发现舵机: {}").format(self.port_name, self.servo_ids)
-            )
-
-            # 如果指定了预加载文件，读取现有校准数据
-            if self.preload_file:
-                self.preload_calibration_data()
-
+                tr("串口: {} | 已连接 | 发现舵机: {}").format(self.port_name, self.servo_ids))
+            self.refresh_table()
+            self._update_buttons()
             return True
 
         except Exception as e:
             QMessageBox.critical(self, tr("错误"), tr("连接失败: {}").format(e))
             return False
 
-    def preload_calibration_data(self):
-        """从已有校准文件预填数据，允许用户选择性地重新校准"""
-        try:
-            with open(self.preload_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            loaded_count = 0
-            for joint in self.joints:
-                name = joint["name"]
-                if name in data:
-                    joint["homing_offset"] = data[name].get("homing_offset")
-                    joint["range_min"] = data[name].get("range_min")
-                    joint["range_max"] = data[name].get("range_max")
-                    joint["status"] = "done"
-                    loaded_count += 1
-
-            self.status_label.setText(
-                tr("串口: {} | 已连接 | 已加载 {} 个关节数据 | 选择关节后可重新记录以覆盖").format(self.port_name, loaded_count)
-            )
-            print(
-                tr("[DEBUG] 已加载现有校准文件: {}, 预填 {} 个关节数据").format(self.preload_file, loaded_count)
-            )
-        except Exception as e:
-            QMessageBox.warning(self, tr("警告"), tr("加载校准文件失败: {}").format(e))
-
     def scan_servos(self) -> List[int]:
-        """扫描舵机"""
         found = []
         for servo_id in range(1, 21):
-            model_number, result, error = self.servo_handler.ping(servo_id)
+            _model, result, _error = self.servo_handler.ping(servo_id)
             if result == COMM_SUCCESS:
                 found.append(servo_id)
         return found
 
     def set_torque(self, enable: bool):
-        """设置所有舵机力矩"""
+        if not self.servo_handler:
+            return
         value = TORQUE_ON if enable else TORQUE_OFF
-        for servo_id in self.servo_ids:
-            self.servo_handler.write1ByteTxRx(servo_id, TORQUE_ENABLE_ADDR, value)
-            time.sleep(0.02)
+        with self._io_lock:
+            for servo_id in self.servo_ids:
+                self.servo_handler.write1ByteTxRx(servo_id, TORQUE_ENABLE_ADDR, value)
+                time.sleep(0.02)
+
+    # ---------------- 实时刷新 ----------------
 
     def on_positions_updated(self, positions: dict):
-        """收到新位置数据"""
-        current_id = self.current_joint_index + 1
-        if self.is_recording and current_id in positions:
-            pos = positions[current_id]
-            joint = self.joints[self.current_joint_index]
-            old_min = joint["range_min"]
-            old_max = joint["range_max"]
-            if joint["range_min"] is None or pos < joint["range_min"]:
-                joint["range_min"] = pos
-            if joint["range_max"] is None or pos > joint["range_max"]:
-                joint["range_max"] = pos
-            if joint["range_min"] != old_min or joint["range_max"] != old_max:
-                print(tr("[DEBUG] 记录范围更新: ID{}, pos={}, range=[{}, {}]").format(current_id, pos, joint['range_min'], joint['range_max']))
-
         for servo_id, pos in positions.items():
-            index = servo_id - 1
-            if 0 <= index < len(self.joints):
-                self.joints[index]["current_pos"] = pos
+            self.latest[servo_id] = pos
 
-    def update_ui(self):
-        """刷新 UI 显示"""
-        for i, joint in enumerate(self.joints):
-            # 当前位置
-            current_pos = joint["current_pos"]
-            current_text = str(current_pos) if current_pos is not None else "--"
-            self.joints_table.item(i, 1).setText(current_text)
+            pos_input = self.pos_inputs.get(servo_id)
+            if pos_input is not None:
+                pos_input.setValue(pos)
+            slider = self.sliders.get(servo_id)
+            if slider is not None:
+                slider.setValue(pos)
 
-            # 中位值
-            homing = joint["homing_offset"]
-            self.joints_table.item(i, 2).setText(str(homing) if homing is not None else "--")
+            if self.center_recording:
+                # 中位列实时跟着左侧 Pos：直接记原始位置，保存时再换算成 LeRobot 的增量
+                st = self.state.get(servo_id)
+                if st is not None:
+                    st["center"] = pos
 
-            # 最小值/最大值
-            rmin = joint["range_min"]
-            rmax = joint["range_max"]
-            self.joints_table.item(i, 3).setText(str(rmin) if rmin is not None else "--")
-            self.joints_table.item(i, 4).setText(str(rmax) if rmax is not None else "--")
+            if not self.is_recording:
+                continue
+            st = self.state.get(servo_id)
+            if st is None or st["center"] is None:
+                continue
+            if st["min"] is None or pos < st["min"]:
+                st["min"] = pos
+            if st["max"] is None or pos > st["max"]:
+                st["max"] = pos
 
-            # 状态
-            status_item = self.joints_table.item(i, 5)
-            if joint["status"] == "done":
-                status_item.setText(tr("✅ 完成"))
-                status_item.setForeground(QColor("#26a69a"))
-            elif joint["status"] == "homing_done":
-                status_item.setText(tr("📝 已记录中位"))
-                status_item.setForeground(QColor("#5c6bc0"))
-            elif joint["status"] == "disconnected":
-                status_item.setText(tr("❌ 未连接"))
-                status_item.setForeground(QColor("#546e7a"))
+    def refresh_table(self):
+        for row, sid in enumerate(sorted(ID_TO_JOINT)):
+            st = self.state[sid]
+            center = st["center"]
+            rmin = st["min"]
+            rmax = st["max"]
+
+            self.table.item(row, 0).setText(f"ID{sid}")
+            self.table.item(row, 1).setText(str(center) if center is not None else "--")
+            self.table.item(row, 2).setText(str(rmin) if rmin is not None else "--")
+            self.table.item(row, 3).setText(str(rmax) if rmax is not None else "--")
+
+            status_item = self.table.item(row, 4)
+            if sid not in self.servo_ids:
+                text, color = tr("未连接"), "#c62828"
+            elif (self.center_recording or self.is_recording) and center is not None:
+                text, color = tr("记录中"), "#ef6c00"
+            elif center is None:
+                text, color = tr("待记录"), "#78909c"
+            elif rmin is None or rmax is None:
+                text, color = tr("已记中位"), "#3949ab"
             else:
-                status_item.setText(tr("⏳ 未校准"))
-                status_item.setForeground(QColor("#dc3545"))
+                text, color = tr("完成"), "#2e7d32"
+            status_item.setText(text)
+            status_item.setForeground(QColor(color))
 
-        # 高亮当前行
-        # 显式设置每个单元格的背景/前景，避免 Windows 深色主题下出现黑色背景
-        for i in range(len(self.joints)):
-            for col in range(6):
-                item = self.joints_table.item(i, col)
-                if i == self.current_joint_index:
-                    item.setBackground(QColor("#fff3cd"))
-                else:
-                    # 交替行颜色：白 / 浅灰
-                    item.setBackground(QColor("#ffffff" if i % 2 == 0 else "#fafbfc"))
+    def _update_buttons(self):
+        online = self.connected and bool(self.servo_ids)
+        self.record_center_btn.setEnabled(online and not self.is_recording)
+        self.record_range_btn.setEnabled(online and not self.center_recording)
+        self.save_btn.setEnabled(
+            online and not self.center_recording and not self.is_recording)
 
-                # 状态列保留自定义颜色，其他列统一深色文字
-                if col != 5:
-                    item.setForeground(QColor("#263238"))
+    # ---------------- 记录 ----------------
 
-        # 更新当前位置大字
-        current_joint = self.joints[self.current_joint_index]
-        current_pos = current_joint["current_pos"]
-        self.current_pos_label.setText(
-            tr("当前位置: {}").format(current_pos if current_pos is not None else '--')
-        )
+    def on_center_toggled(self, checked: bool):
+        """【开始中位值记录】/【完成中位值记录】
 
-        # 记录中时的视觉反馈
-        if self.is_recording:
-            self.current_pos_label.setStyleSheet(
-                "font-size: 36px; font-weight: bold; color: #856404; "
-                "background-color: #fff3cd; padding: 15px; border-radius: 8px;"
-            )
+        按下后表格中位列实时跟随左侧 Pos，操作员摆好姿态后再按一次冻结。
+        """
+        if self._toggle_guard:
+            return
+        if checked:
+            self._start_center_recording()
         else:
-            self.current_pos_label.setStyleSheet(
-                "font-size: 36px; font-weight: bold; color: #5c6bc0; "
-                "background-color: #eef1f5; padding: 15px; border-radius: 8px;"
-            )
+            self._finish_center_recording()
 
-        # 更新说明文字和按钮状态
-        self.update_instruction()
-
-    def update_instruction(self):
-        """更新操作说明和按钮可用状态"""
-        joint = self.joints[self.current_joint_index]
-        name = joint["display_name"]
-
-        # 记录范围进行中：除【停止记录范围】外，其他操作按钮全部禁用
+    def _start_center_recording(self):
+        if not self.connected:
+            self._set_center_checked(False)
+            return
         if self.is_recording:
-            self.instruction_label.setText(
-                tr("⏺️ 正在记录 {} 的运动范围...\n请将关节缓慢移动到极限位置，\n然后点击【停止记录范围】。").format(name)
-            )
-            self.record_home_btn.setEnabled(False)
-            self.start_range_btn.setEnabled(False)
-            self.stop_range_btn.setEnabled(True)
-            self.prev_btn.setEnabled(False)
-            self.next_btn.setEnabled(False)
-            self.save_btn.setEnabled(False)
-            self.current_joint_label.setText(tr("当前关节: ID{} - {}").format(joint['id'], name))
+            self._set_center_checked(False)
+            QMessageBox.warning(self, tr("警告"), tr("请先停止记录运动范围"))
             return
 
-        if joint["status"] == "disconnected":
-            self.instruction_label.setText(
-                tr("⚠️ 当前关节 {} 未连接。\n请检查舵机 ID{} 的电源和接线，\n然后关闭向导重新打开。").format(name, joint['id'])
-            )
-            self.record_home_btn.setEnabled(False)
-            self.start_range_btn.setEnabled(False)
-            self.stop_range_btn.setEnabled(False)
-        elif joint["name"] in CONTINUOUS_JOINTS:
-            self.instruction_label.setText(
-                tr("当前关节: {}\n这是连续旋转关节（wrist_roll），只需记录中位值，\n范围固定为 [0, 4095]。").format(name)
-            )
-            self.record_home_btn.setEnabled(True)
-            self.start_range_btn.setEnabled(False)
-            self.stop_range_btn.setEnabled(False)
-        elif joint["status"] == "pending":
-            self.instruction_label.setText(
-                tr("步骤 1/2：请将 {} 移动到运动范围的中间位置，\n然后点击【记录中位值】。").format(name)
-            )
-            self.record_home_btn.setEnabled(True)
-            self.start_range_btn.setEnabled(False)
-            self.stop_range_btn.setEnabled(False)
-        elif joint["status"] == "homing_done":
-            self.instruction_label.setText(
-                tr("步骤 2/2：{} 中位已记录为 {}。\n现在请缓慢移动该关节经过整个运动范围，\n点击【开始记录范围】，移动完成后点击【停止记录范围】。").format(name, joint['homing_offset'])
-            )
-            self.record_home_btn.setEnabled(True)
-            self.start_range_btn.setEnabled(True)
-            self.stop_range_btn.setEnabled(False)
-        elif joint["status"] == "done":
-            self.instruction_label.setText(
-                tr("✅ {} 校准完成！\n中位: {} | 范围: [{}, {}]").format(name, joint['homing_offset'], joint['range_min'], joint['range_max'])
-            )
-            self.record_home_btn.setEnabled(True)
-            self.start_range_btn.setEnabled(True)
-            self.stop_range_btn.setEnabled(False)
+        # 每次开始都先把运动偏移清零。偏移不清零的话，第二次记录时读到的是
+        # 「已经减过上次偏移」的位置，算出来的中位会整体偏掉。
+        failed = []
+        for sid in self.servo_ids:
+            ok, error = servo_eeprom.write_eeprom(
+                self.servo_handler, sid, SMS_STS_OFS_L, 0, lock=self._io_lock)
+            if not ok:
+                failed.append(f"ID{sid}（{error}）")
+            st = self.state[sid]
+            st["center"] = None
+            st["min"] = None
+            st["max"] = None
 
-        # 导航按钮：首尾关节禁用对应方向
-        self.prev_btn.setEnabled(self.current_joint_index > 0)
-        self.next_btn.setEnabled(self.current_joint_index < len(self.joints) - 1)
-        self.save_btn.setEnabled(True)
+        if failed:
+            self._set_center_checked(False)
+            QMessageBox.warning(
+                self, tr("警告"),
+                tr("中位值写入失败：{}").format('; '.join(failed)))
+            return
 
-        # 更新当前关节标签
-        self.current_joint_label.setText(
-            tr("当前关节: ID{} - {}").format(joint['id'], name)
-        )
+        self.center_recording = True
+        self.record_center_btn.setText(tr("完成中位值记录"))
+        self.range_timer.start(100)
+        self.status_label.setText(tr("正在记录中位值，摆好后点【完成中位值记录】"))
+        self._update_buttons()
+        self.refresh_table()
 
-    def on_selection_changed(self):
-        """表格选择改变"""
-        selected = self.joints_table.selectedItems()
-        if selected:
-            row = selected[0].row()
-            self.current_joint_index = row
+    def _finish_center_recording(self):
+        self.center_recording = False
+        self.range_timer.stop()
+        self.record_center_btn.setText(tr("开始中位值记录"))
 
-    def _read_position_directly(self, servo_id: int) -> Optional[int]:
-        """直接读取指定舵机位置（用于重试）"""
-        if not self.servo_handler:
-            return None
+        missing = [sid for sid in self.servo_ids if self.state[sid]["center"] is None]
+        failed = []
+        for sid in self.servo_ids:
+            st = self.state[sid]
+            if st["center"] is None:
+                continue
+            ok, error = servo_eeprom.write_eeprom(
+                self.servo_handler, sid, SMS_STS_OFS_L,
+                encode_homing_offset(homing_offset_from_position(st["center"])),
+                lock=self._io_lock)
+            if ok:
+                # 偏移变了，之前记录的行程作废
+                st["min"] = None
+                st["max"] = None
+            else:
+                failed.append(f"ID{sid}（{error}）")
+
+        self.refresh_table()
+        self._update_buttons()
+
+        if failed:
+            QMessageBox.warning(
+                self, tr("警告"),
+                tr("中位值写入失败：{}").format('; '.join(failed)))
+        elif missing:
+            QMessageBox.warning(
+                self, tr("警告"),
+                tr("以下舵机没有读到位置，无法记录中位：{}").format(
+                    ', '.join(f"ID{sid}" for sid in missing)),
+            )
+        else:
+            self.status_label.setText(
+                tr("已记录 {} 个舵机的中位值").format(len(self.servo_ids)))
+
+    def _set_center_checked(self, checked: bool):
+        self._toggle_guard = True
         try:
-            pos, result, error = self.servo_handler.ReadPos(servo_id)
-            if result == COMM_SUCCESS:
-                return pos
-            else:
-                print(tr("[DEBUG] 直接读取 ID{} 失败: result={}, error={}").format(servo_id, result, error))
-        except Exception as e:
-            print(tr("[DEBUG] 直接读取 ID{} 异常: {}").format(servo_id, e))
-        return None
+            self.record_center_btn.setChecked(checked)
+        finally:
+            self._toggle_guard = False
 
-    def record_homing(self):
-        """记录中位值"""
-        joint = self.joints[self.current_joint_index]
-
-        if joint["status"] == "disconnected":
-            QMessageBox.warning(self, tr("警告"), tr("舵机 ID{} 未连接，无法记录").format(joint['id']))
+    def on_range_toggled(self, checked: bool):
+        """【记录运动范围】按钮：按下变绿开始记录，再按停止"""
+        if self._toggle_guard:
             return
 
-        current_pos = joint["current_pos"]
+        if checked:
+            if not self.connected:
+                self._set_range_checked(False)
+                return
+            if self.center_recording:
+                self._set_range_checked(False)
+                QMessageBox.warning(self, tr("警告"), tr("请先完成中位值记录"))
+                return
+            if any(self.state[sid]["center"] is None for sid in self.servo_ids):
+                self._set_range_checked(False)
+                QMessageBox.warning(self, tr("警告"), tr("请先记录中位值"))
+                return
 
-        # 如果当前位置为空，尝试直接读取一次
-        if current_pos is None:
-            current_pos = self._read_position_directly(joint["id"])
-            if current_pos is not None:
-                joint["current_pos"] = current_pos
+            for sid in self.servo_ids:
+                st = self.state[sid]
+                st["min"] = self.latest.get(sid)
+                st["max"] = self.latest.get(sid)
 
-        if current_pos is None:
-            QMessageBox.warning(
-                self,
-                tr("警告"),
-                tr("当前无法读取舵机 ID{} 的位置。\n可能原因：\n1. 该舵机未连接或没有上电\n2. 串口被其他程序占用\n3. 后台读取线程尚未收到数据（请等待几秒后重试）").format(joint['id'])
-            )
-            return
-
-        joint["homing_offset"] = current_pos
-
-        if joint["name"] in CONTINUOUS_JOINTS:
-            joint["range_min"] = 0
-            joint["range_max"] = 4095
-            joint["status"] = "done"
-            self.status_label.setText(tr("已记录 {} 中位和范围（连续旋转）").format(joint['display_name']))
+            self.is_recording = True
+            self.record_range_btn.setText(tr("停止记录范围"))
+            self.range_timer.start(100)
+            self.status_label.setText(tr("正在记录运动范围，请依次移动各关节"))
+            self._update_buttons()
+            self.refresh_table()
         else:
-            joint["status"] = "homing_done"
-            self.status_label.setText(tr("已记录 {} 中位值: {}").format(joint['display_name'], current_pos))
+            self.is_recording = False
+            self.range_timer.stop()
+            self.record_range_btn.setText(tr("记录运动范围"))
 
-        # 自动下一个
-        self.next_joint()
+            for sid in self.servo_ids:
+                st = self.state[sid]
+                if ID_TO_JOINT[sid] in CONTINUOUS_JOINTS:
+                    st["min"], st["max"] = 0, MAX_RES
+                elif st["min"] is not None and st["min"] == st["max"]:
+                    # 这个关节根本没动过，不能当有效行程
+                    st["min"] = st["max"] = None
 
-    def _record_current_position(self):
-        """范围记录专用：高频读取当前关节位置并更新范围"""
-        if not self.is_recording:
-            return
+            self.refresh_table()
+            self.status_label.setText(tr("运动范围记录完成"))
+            self._update_buttons()
+            self._maybe_auto_save()
 
-        joint = self.joints[self.current_joint_index]
-        pos = self._read_position_directly(joint["id"])
+    def _set_range_checked(self, checked: bool):
+        self._toggle_guard = True
+        try:
+            self.record_range_btn.setChecked(checked)
+        finally:
+            self._toggle_guard = False
 
-        if pos is None:
-            return
+    # ---------------- 保存 ----------------
 
-        joint["current_pos"] = pos
-        old_min = joint["range_min"]
-        old_max = joint["range_max"]
-
-        if joint["range_min"] is None or pos < joint["range_min"]:
-            joint["range_min"] = pos
-        if joint["range_max"] is None or pos > joint["range_max"]:
-            joint["range_max"] = pos
-
-        if joint["range_min"] != old_min or joint["range_max"] != old_max:
-            print(tr("[DEBUG] 范围记录更新: ID{}, pos={}, range=[{}, {}]").format(joint['id'], pos, joint['range_min'], joint['range_max']))
-
-    def start_range_recording(self):
-        """开始记录范围"""
-        joint = self.joints[self.current_joint_index]
-
-        if joint["status"] == "disconnected":
-            QMessageBox.warning(self, tr("警告"), tr("舵机 ID{} 未连接，无法记录范围").format(joint['id']))
-            return
-
-        current_pos = joint["current_pos"]
-
-        # 如果当前位置为空，尝试直接读取一次
-        if current_pos is None:
-            current_pos = self._read_position_directly(joint["id"])
-            if current_pos is not None:
-                joint["current_pos"] = current_pos
-
-        if current_pos is None:
-            QMessageBox.warning(
-                self,
-                tr("警告"),
-                tr("当前无法读取舵机 ID{} 的位置。\n请检查连接后重试。").format(joint['id'])
-            )
-            return
-
-        joint["range_min"] = current_pos
-        joint["range_max"] = current_pos
-        self.is_recording = True
-
-        self.start_range_btn.setEnabled(False)
-        self.stop_range_btn.setEnabled(True)
-        self.status_label.setText(tr("正在记录 {} 的运动范围...").format(joint['display_name']))
-        print(tr("[DEBUG] 开始记录范围: {} (ID{}), 初始值={}").format(joint['display_name'], joint['id'], current_pos))
-
-        # 启动高频读取定时器，确保能捕捉到运动范围的极值
-        self.range_recording_timer.start(30)  # 约 33Hz
-
-        # 立即刷新按钮状态，禁用其他操作
-        self.update_instruction()
-
-    def stop_range_recording(self):
-        """停止记录范围"""
-        if not self.is_recording:
-            return
-
-        self.is_recording = False
-        joint = self.joints[self.current_joint_index]
-        joint["status"] = "done"
-
-        self.start_range_btn.setEnabled(True)
-        self.stop_range_btn.setEnabled(False)
-        self.status_label.setText(
-            tr("{} 范围记录完成: [{}, {}]").format(joint['display_name'], joint['range_min'], joint['range_max'])
+    def _all_done(self) -> bool:
+        # 少一个舵机也不算完成：JSON 缺关节时 LeRobot 依旧判定未校准
+        if len(self.servo_ids) < len(ID_TO_JOINT):
+            return False
+        return all(
+            self.state[sid]["center"] is not None
+            and self.state[sid]["min"] is not None
+            and self.state[sid]["max"] is not None
+            for sid in self.servo_ids
         )
-        print(tr("[DEBUG] 停止记录范围: {} (ID{}), 范围=[{}, {}]").format(joint['display_name'], joint['id'], joint['range_min'], joint['range_max']))
 
-        # 停止高频读取定时器
-        self.range_recording_timer.stop()
-
-        # 自动下一个
-        self.next_joint()
-
-        # 立即刷新按钮状态，恢复其他操作
-        self.update_instruction()
-
-    def next_joint(self):
-        """切换到下一个关节"""
-        if self.current_joint_index < len(self.joints) - 1:
-            self.current_joint_index += 1
-            self.joints_table.selectRow(self.current_joint_index)
-
-    def prev_joint(self):
-        """切换到上一个关节"""
-        if self.current_joint_index > 0:
-            self.current_joint_index -= 1
-            self.joints_table.selectRow(self.current_joint_index)
+    def _maybe_auto_save(self):
+        if not self.auto_save or not self.connected:
+            return
+        if self._all_done():
+            self._save_calibration_file(auto=True)
 
     def save_calibration(self):
-        """保存校准文件"""
-        # 检查是否所有关节都已完成
-        incomplete = []
-        for joint in self.joints:
-            if joint["status"] != "done":
-                incomplete.append(joint["display_name"])
+        self._save_calibration_file(auto=False)
 
-        if incomplete:
+    def _build_calibration_data(self) -> dict:
+        data = {}
+        for sid in sorted(ID_TO_JOINT):
+            st = self.state[sid]
+            data[ID_TO_JOINT[sid]] = {
+                "id": sid,
+                "drive_mode": 0,
+                # 表格里显示的是原始中位位置，写进文件时换算成 LeRobot 的增量
+                "homing_offset": (homing_offset_from_position(st["center"])
+                                  if st["center"] is not None else 0),
+                "range_min": st["min"] if st["min"] is not None else 0,
+                "range_max": st["max"] if st["max"] is not None else MAX_RES,
+            }
+        return data
+
+    def _save_calibration_file(self, auto=False):
+        if not self.connected:
+            QMessageBox.warning(self, tr("警告"), tr("串口未连接"))
+            return
+
+        if not self._all_done() and not auto:
+            incomplete = [
+                "ID{}".format(sid) for sid in sorted(ID_TO_JOINT)
+                if self.state[sid]["center"] is None
+                or self.state[sid]["min"] is None
+                or self.state[sid]["max"] is None
+            ]
             reply = QMessageBox.question(
                 self,
                 tr("确认保存"),
-                tr("以下关节尚未完成校准:\n{}\n\n未完成关节将使用默认值（中位=2048, 范围=[0,4095]）。\n是否继续保存？").format(', '.join(incomplete)),
+                tr("以下关节尚未完成校准:\n{}\n\n未完成关节将使用默认值（中位偏移=0, 范围=[0,4095]）。\n是否继续保存？").format(
+                    ', '.join(incomplete)),
                 QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
+                QMessageBox.No,
             )
             if reply != QMessageBox.Yes:
                 return
 
-        # 构建校准数据
-        calibration_data = {}
-        for joint in self.joints:
-            calibration_data[joint["name"]] = {
-                "id": joint["id"],
-                "drive_mode": 0,
-                "homing_offset": joint["homing_offset"] if joint["homing_offset"] is not None else 2048,
-                "range_min": joint["range_min"] if joint["range_min"] is not None else 0,
-                "range_max": joint["range_max"] if joint["range_max"] is not None else 4095,
-            }
+        calibration_data = self._build_calibration_data()
 
-        # 保存路径
+        # 先写回舵机：LeRobot 的 is_calibrated 是拿 JSON 与寄存器逐个比对，
+        # 两边一致它才不会每次连接都提示重新校准
+        write_failures = servo_eeprom.write_calibration_to_servos(
+            self.servo_handler, calibration_data, lock=self._io_lock)
+
         calib_id = self.id_input.text().strip()
         if not calib_id:
-            calib_id = "my_awesome_leader_arm" if self.arm_type == "leader" else "my_awesome_follower_arm"
+            calib_id = "my_leader_arm" if self.arm_type == "leader" else "my_follower_arm"
 
         manager = CalibrationManager()
         if self.arm_type == "leader":
             save_dir = manager.teleoperators_dir / "so_leader"
         else:
             save_dir = manager.robots_dir / "so_follower"
-
         save_path = save_dir / f"{calib_id}.json"
 
         try:
@@ -929,32 +801,63 @@ class CalibrationWizard(QDialog):
             with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(calibration_data, f, indent=4, ensure_ascii=False)
 
-            QMessageBox.information(
-                self,
-                tr("保存成功"),
-                tr("校准文件已保存:\n{}\n\n可以在 LeRobot 中使用 ID: {}").format(save_path, calib_id)
-            )
+            self.saved_path = str(save_path)
+            self.saved_id = calib_id
+
+            arm_label = tr("主动臂") if self.arm_type == "leader" else tr("从动臂")
+            message = tr("{}校准文件已保存:\n{}\n\nID: {}").format(
+                arm_label, save_path, calib_id)
+            if write_failures:
+                message += "\n\n" + tr(
+                    "以下关节的参数未能写回舵机，LeRobot 可能仍提示未校准：{}").format(
+                    ', '.join(write_failures))
+            QMessageBox.information(self, tr("保存成功"), message)
             self.status_label.setText(tr("校准文件已保存: {}").format(save_path))
 
         except Exception as e:
+            self.saved_path = None
+            self.saved_id = None
             QMessageBox.critical(self, tr("保存失败"), tr("保存校准文件失败: {}").format(e))
 
+    # ---------------- 生命周期 ----------------
+
+    def _ask_save_on_close(self):
+        if self._closing:
+            return
+        self._closing = True
+        if not self.auto_save or self.saved_path or not self.connected:
+            return
+        if all(self.state[sid]["center"] is None for sid in self.servo_ids):
+            return
+
+        reply = QMessageBox.question(
+            self,
+            tr("尚未保存"),
+            tr("校准尚未完成，是否保存当前数据？\n将覆盖同 ID 的已有校准文件。"),
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply == QMessageBox.Yes:
+            self._save_calibration_file(auto=True)
+
     def disconnect_and_close(self):
-        """断开连接并关闭"""
+        self._ask_save_on_close()
         self.cleanup()
         self.accept()
 
     def close(self):
-        """关闭对话框"""
+        self._ask_save_on_close()
         self.cleanup()
         super().close()
 
+    def reject(self):
+        self._ask_save_on_close()
+        self.cleanup()
+        super().reject()
+
     def cleanup(self):
-        """清理资源"""
-        if self.range_recording_timer:
-            self.range_recording_timer.stop()
-        if self.ui_timer:
-            self.ui_timer.stop()
+        if self.range_timer.isActive():
+            self.range_timer.stop()
         if self.reader_thread:
             self.reader_thread.stop()
             self.reader_thread = None
@@ -962,13 +865,8 @@ class CalibrationWizard(QDialog):
             try:
                 self.set_torque(False)
                 self.port_handler.closePort()
-            except:
+            except Exception:
                 pass
-
-    def reject(self):
-        """点击 X 关闭时也清理"""
-        self.cleanup()
-        super().reject()
 
 
 if __name__ == "__main__":
@@ -976,7 +874,6 @@ if __name__ == "__main__":
     if setup_light_theme:
         setup_light_theme(app)
 
-    # 语言选择：--lang 指定时直接使用，否则弹出选择对话框
     lang = lang_from_argv(sys.argv)
     if lang is None:
         from src.gui.language_dialog import choose_language

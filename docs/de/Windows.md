@@ -70,8 +70,12 @@ Ports (COM & LPT)
 ## 6. GUI starten
 
 ```bash
+python main.py
+# or
 python -m src.gui.factory_calibration_tool
 ```
+
+> **Option ohne Installation (Windows)**: Doppelklicken Sie auf `dist\SO-ARM101-ServoController.exe`; auf dem Zielrechner wird kein Python benötigt. Neu bauen mit `pyinstaller -y SO-ARM101-ServoController.spec`.
 
 Oder geben Sie die Ports an (falls belegt):
 
@@ -89,16 +93,25 @@ python -m src.gui.factory_calibration_tool --list-ports
 
 ### 7.1 Tab Servokalibrierung
 
-1. Wählen Sie Port1/Port2 in der Kopfleiste aus → Servos werden automatisch gescannt (ID 1-6)
+1. Wählen Sie den Leader-/Follower-Port in der Kopfleiste aus → Servos werden automatisch gescannt (ID 1-6).
 2. Gängige Schaltflächen:
-   - **Mittelpunktkalibrierung**: aktuelle Position als Mittelpunkt 2048 setzen
-   - **Mittelpunkttest**: Drehmoment aktivieren und in den Mittelpunkt fahren, um zu prüfen
-   - **Servos deaktivieren**: Drehmoment zum manuellen Drehen abschalten
+   - **Mittelpunktkalibrierung Leader-Arm / Follower-Arm**: öffnet den LeRobot-Kalibrierungsassistenten
+     - Linke Spalte: Live-Anzeige für alle sechs Servos (ID / Pos / Slider)
+     - **Mittelpunkt aufzeichnen** (wird orange) → Arm in seinen Mittelpunkt stellen → **Mittelpunktaufzeichnung beenden**
+     - **Bereich aufzeichnen** (wird grün) → jedes Gelenk von Grenze zu Grenze durchfahren, einschließlich des Greifers → erneut klicken zum Stoppen
+     - Sobald alle sechs Gelenke fertig sind, wird die Kalibrierungsdatei automatisch gespeichert und überschreibt die vorherige; außerdem werden Offsets/Grenzen zurück in das Servo-EEPROM geschrieben
+   - **Mittelpunkttest Leader-Arm / Follower-Arm**: aktiviert das Drehmoment und fährt in den Mittelpunkt, um zu prüfen
+   - **Motoren deaktivieren Leader-Arm / Follower-Arm**: deaktiviert das Drehmoment für manuelles Bewegen
+
+> ⚠️ Fahren Sie beide Arme über denselben Verfahrweg durch, sonst stimmt die Bewegung des Followers bei der Fernsteuerung nicht mit der des Leaders überein.
 
 ### 7.2 Tab Einzel-Servo-Steuerung
 
-- Slider ziehen → Servo fährt beim Loslassen zur Zielposition
-- Der Drehmomentschalter steuert einzelne Servos
+- Jede Zeile: ID / Pos / Slider / L (Zielposition)
+- **Pos und Slider sind beidseitig gebunden**: Das Ziehen des Sliders aktualisiert Pos; die Eingabe in Pos bewegt den Slider und sendet den Befehl sofort
+- Der Befehl wird beim Loslassen des Sliders gesendet, nicht kontinuierlich während des Ziehens
+- Während sich der Servo bewegt, folgen Slider und Pos der tatsächlichen Position
+- ⚡ Drehmoment / 🎯 Mittelpunkt / 🧹 Grenzen löschen wirken auf diesen einzelnen Servo
 
 ### 7.3 Tab FT-Debugger
 
@@ -118,9 +131,9 @@ python -m src.gui.factory_calibration_tool --list-ports
 
 ### 7.4 Fernsteuerung
 
-> ⚠️ **Richtung: Port1 steuert Port2**. Port1 (Master) liest nur die Servowinkel, Port2 (Slave) wird synchronisiert. Erfordert übereinstimmende Servo-IDs an beiden Ports.
+> ⚠️ **Richtung: Der Leader-Arm steuert den Follower-Arm**. Der Leader-Arm (Master) liest nur die Servowinkel, der Follower-Arm (Slave) wird synchronisiert. Erfordert übereinstimmende Servo-IDs an beiden Ports.
 
-- Schaltfläche `🎮 Fernbedienung` in der Kopfleiste: Port1 liest → Port2 steuert (Servos mit gleicher ID)
+- Schaltfläche `🎮 Fernbedienung` in der Kopfleiste: der Leader-Arm liest → der Follower-Arm steuert (Servos mit gleicher ID)
 - Erneut klicken, um die Fernsteuerung zu beenden
 
 ## 8. Fehlerbehebung

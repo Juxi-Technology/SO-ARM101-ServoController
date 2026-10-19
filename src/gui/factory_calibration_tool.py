@@ -32,6 +32,12 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QTimer, Signal, QObject, Qt
 from PySide6.QtGui import QFont, QPalette, QColor, QTextCursor
 
+from src.launcher import (
+    build_restart_command,
+    build_tool_command,
+    child_workdir,
+)
+
 from scservo_sdk.port_handler import PortHandler
 from scservo_sdk.sms_sts import sms_sts
 from scservo_sdk.scservo_def import COMM_SUCCESS
@@ -49,6 +55,16 @@ try:
 except ImportError:
     FtDebuggerPanel = None
     FT_DEBUGGER_AVAILABLE = False
+
+# LeRobot 完整校准向导（主动臂 / 从动臂校准按钮用）。
+# 该模块导入失败时会 sys.exit(1)，所以这里连 SystemExit 一起兜住，
+# 别让一个可选面板把整个主界面带下去。
+try:
+    from src.gui.calibration_wizard import CalibrationWizard
+    CALIBRATION_WIZARD_AVAILABLE = True
+except (ImportError, SystemExit):
+    CalibrationWizard = None
+    CALIBRATION_WIZARD_AVAILABLE = False
 
 # 引入主题工具，强制浅色主题以避免 Windows 深色模式下文字看不见
 try:
@@ -172,8 +188,7 @@ class RemoteControlWorker(QObject):
         super().__init__()
         self.remote_process = None
         self.running = False
-        # 项目根目录（模块顶部已定义），保证子进程能找到 src.tools 模块
-        self.project_root = PROJECT_ROOT
+        self.project_root = child_workdir()
         self.read_port = read_port
         self.control_port = control_port
 
@@ -183,12 +198,12 @@ class RemoteControlWorker(QObject):
             return False, tr("遥控操作已在运行")
 
         try:
-            # 使用 -m 模块方式运行，确保能找到 scservo_sdk
-            command = [sys.executable, '-m', 'src.tools.servo_remote_control']
+            args = []
             if self.read_port:
-                command.extend(['--read-port', self.read_port])
+                args.extend(['--read-port', self.read_port])
             if self.control_port:
-                command.extend(['--control-port', self.control_port])
+                args.extend(['--control-port', self.control_port])
+            command = build_tool_command('servo_remote_control', *args)
 
             # 启动子进程运行遥控脚本
             self.remote_process = subprocess.Popen(
@@ -1487,7 +1502,8 @@ class ServoPanel(QWidget):
         # 第一行：ID | 当前位置 | 电压 | 温度 | 滑动条 | 目标位置 | 力矩开关
         # 第二行：速度 | 负载 | 电流 | 运行状态 | 型号
         self.servo_sliders = {}
-        self.servo_pos_labels = {}
+        self.servo_pos_inputs = {}
+        self._syncing_ui = False
         self.servo_voltage_labels = {}
         self.servo_temp_labels = {}
         self.servo_target_labels = {}
@@ -1513,10 +1529,19 @@ class ServoPanel(QWidget):
             id_label.setStyleSheet("font-weight: bold; font-size: 12px; min-width: 35px;")
             row_layout.addWidget(id_label)
 
-            pos_label = QLabel("Pos: --")
-            pos_label.setStyleSheet("font-size: 11px; min-width: 65px;")
-            self.servo_pos_labels[servo_id] = pos_label
-            row_layout.addWidget(pos_label)
+            pos_input = QSpinBox()
+            pos_input.setRange(0, 4095)
+            pos_input.setValue(2048)
+            pos_input.setPrefix("Pos: ")
+            # 关掉逐键触发：只在回车/失焦/点箭头时发命令，避免输入 "2048" 时中途乱动
+            pos_input.setKeyboardTracking(False)
+            pos_input.setEnabled(False)
+            pos_input.setMinimumWidth(90)
+            pos_input.setStyleSheet("font-size: 11px;")
+            pos_input.valueChanged.connect(
+                lambda value, sid=servo_id: self.on_pos_input_changed(sid, value))
+            self.servo_pos_inputs[servo_id] = pos_input
+            row_layout.addWidget(pos_input)
 
             voltage_label = QLabel("V: --")
             voltage_label.setStyleSheet("font-size: 11px; min-width: 55px; color: #26a69a;")
@@ -1556,7 +1581,7 @@ class ServoPanel(QWidget):
             self.servo_sliders[servo_id] = slider
             row_layout.addWidget(slider, stretch=1)
 
-            target_label = QLabel("T: 2048")
+            target_label = QLabel("L: 2048")
             target_label.setStyleSheet("font-size: 11px; min-width: 55px;")
             self.servo_target_labels[servo_id] = target_label
             row_layout.addWidget(target_label)
@@ -1823,13 +1848,13 @@ class ServoPanel(QWidget):
             clear_limit_btn = self.servo_clear_limit_btns[servo_id]
 
             slider.setEnabled(online)
+            self.servo_pos_inputs[servo_id].setEnabled(online)
             torque_btn.setEnabled(online)
             middle_btn.setEnabled(online)
             clear_limit_btn.setEnabled(online)
 
             if not online:
                 # 离线时重置显示
-                self.servo_pos_labels[servo_id].setText("Pos: --")
                 self.servo_voltage_labels[servo_id].setText("V: --")
                 self.servo_temp_labels[servo_id].setText("T: --")
                 self.servo_speed_labels[servo_id].setText("Spd: --")
@@ -1852,8 +1877,8 @@ class ServoPanel(QWidget):
             return
 
         for servo_id, pos in positions.items():
-            if servo_id in self.servo_pos_labels:
-                self.servo_pos_labels[servo_id].setText(f"Pos: {pos}")
+            if servo_id in self.servo_pos_inputs:
+                self._sync_from_feedback(servo_id, pos)
 
     def update_servo_info(self, info: dict):
         """更新各舵机完整状态显示（电压、温度、速度、负载、电流、运行状态、型号等）"""
@@ -1861,7 +1886,7 @@ class ServoPanel(QWidget):
             return
 
         for servo_id, servo_info in info.items():
-            if servo_id not in self.servo_pos_labels:
+            if servo_id not in self.servo_pos_inputs:
                 continue
 
             pos = servo_info.get("position")
@@ -1874,7 +1899,7 @@ class ServoPanel(QWidget):
             model = servo_info.get("model")
 
             if pos is not None:
-                self.servo_pos_labels[servo_id].setText(f"Pos: {pos}")
+                self._sync_from_feedback(servo_id, pos)
             if voltage is not None:
                 self.servo_voltage_labels[servo_id].setText(f"V: {voltage:.1f}V")
             if temperature is not None:
@@ -1994,18 +2019,59 @@ class ServoPanel(QWidget):
                     main_window.status_bar.showMessage(tr("🚨 {}端口: {}").format(self.port_id, warning_text), 5000)
 
     def on_slider_value_changed(self, servo_id: int, value: int):
-        """滑动条数值变化时更新目标位置显示"""
-        if servo_id in self.servo_target_labels:
-            self.servo_target_labels[servo_id].setText(f"T: {value}")
+        """滑动条变化 -> 同步 Pos 数值框与目标标签"""
+        if self._syncing_ui:
+            return
+        self._sync_target_ui(servo_id, value)
+
+    def on_pos_input_changed(self, servo_id: int, value: int):
+        """Pos 数值框变化 -> 同步滑动条，并把位置命令发给舵机"""
+        if self._syncing_ui:
+            return
+        self._sync_target_ui(servo_id, value)
+        self._send_position(servo_id, value)
+
+    def _sync_target_ui(self, servo_id: int, value: int, update_target_label: bool = True):
+        """把滑动条 / Pos 数值框（/ 目标标签）同步到同一个值（不触发命令）"""
+        self._syncing_ui = True
+        try:
+            slider = self.servo_sliders.get(servo_id)
+            if slider is not None and slider.value() != value:
+                slider.setValue(value)
+            pos_input = self.servo_pos_inputs.get(servo_id)
+            if pos_input is not None and pos_input.value() != value:
+                pos_input.setValue(value)
+            if update_target_label:
+                target_label = self.servo_target_labels.get(servo_id)
+                if target_label is not None:
+                    target_label.setText(f"L: {value}")
+        finally:
+            self._syncing_ui = False
+
+    def _sync_from_feedback(self, servo_id: int, pos: int):
+        """把实时位置同步到滑动条和 Pos 数值框
+
+        拖动中或正在数值框里输入时不动，免得和用户抢控件。
+        """
+        slider = self.servo_sliders.get(servo_id)
+        pos_input = self.servo_pos_inputs.get(servo_id)
+        if slider is None or pos_input is None:
+            return
+        if slider.isSliderDown() or pos_input.hasFocus():
+            return
+        # 实时反馈只跟随「当前位置」，不改写 T（目标值）标签，免得目标值被实际位置覆盖
+        self._sync_target_ui(servo_id, pos, update_target_label=False)
 
     def on_slider_released(self, servo_id: int):
         """滑动条释放后发送目标位置"""
+        slider = self.servo_sliders[servo_id]
+        self._send_position(servo_id, slider.value())
+
+    def _send_position(self, servo_id: int, target: int):
+        """把目标位置发给舵机（滑动条释放与 Pos 数值框共用）"""
         if self.worker is None or not self.worker.is_connected:
             QMessageBox.warning(self, tr("警告"), tr("当前端口未连接，无法发送位置命令"))
             return
-
-        slider = self.servo_sliders[servo_id]
-        target = slider.value()
 
         # 确认力矩已开启（若未开启则自动开启并提示）
         torque_btn = self.servo_torque_btns[servo_id]
@@ -2382,7 +2448,7 @@ class EZToolUI(QMainWindow):
         # 左串口选择
         left_port_layout = QVBoxLayout()
         left_port_layout.setSpacing(2)
-        left_label = QLabel(tr("串口1:"))
+        left_label = QLabel(tr("主动臂串口:"))
         left_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #37474f;")
         left_port_layout.addWidget(left_label)
 
@@ -2408,7 +2474,7 @@ class EZToolUI(QMainWindow):
         # 右串口选择
         right_port_layout = QVBoxLayout()
         right_port_layout.setSpacing(2)
-        right_label = QLabel(tr("串口2:"))
+        right_label = QLabel(tr("从动臂串口:"))
         right_label.setStyleSheet("font-size: 11px; font-weight: bold; color: #37474f;")
         right_port_layout.addWidget(right_label)
 
@@ -2486,7 +2552,7 @@ class EZToolUI(QMainWindow):
             }
         """)
         self.remote_btn.clicked.connect(self.toggle_remote_control)
-        self.remote_btn.setToolTip(tr("启动/停止 双端口同步遥控（左读右控）"))
+        self.remote_btn.setToolTip(tr("启动/停止 双端口同步遥控（主动臂读，从动臂控）"))
         header_layout.addWidget(self.remote_btn)
 
         # 语言切换按钮（运行时切换中英文，重启后生效）
@@ -2532,8 +2598,8 @@ class EZToolUI(QMainWindow):
         buttons_row = QHBoxLayout()
         buttons_row.setSpacing(8)
 
-        # 串口1中位校准按钮
-        self.left_calib_btn = QPushButton(tr("串口1中位校准"))
+        # 主动臂中位校准按钮
+        self.left_calib_btn = QPushButton(tr("主动臂中位校准"))
         self.left_calib_btn.setMinimumSize(100, 35)
         self.left_calib_btn.setStyleSheet("""
             QPushButton {
@@ -2555,11 +2621,11 @@ class EZToolUI(QMainWindow):
                     stop:0 #303f9f, stop:1 #283593);
             }
         """)
-        self.left_calib_btn.clicked.connect(self.run_quick_calibration_left)
+        self.left_calib_btn.clicked.connect(self.run_leader_calibration)
         buttons_row.addWidget(self.left_calib_btn)
 
-        # 串口1中位测试按钮
-        self.left_test_btn = QPushButton(tr("串口1中位测试"))
+        # 主动臂中位测试按钮
+        self.left_test_btn = QPushButton(tr("主动臂中位测试"))
         self.left_test_btn.setMinimumSize(100, 35)
         self.left_test_btn.setStyleSheet("""
             QPushButton {
@@ -2584,8 +2650,8 @@ class EZToolUI(QMainWindow):
         self.left_test_btn.clicked.connect(self.run_quick_test_left)
         buttons_row.addWidget(self.left_test_btn)
 
-        # 串口1失能电机按钮
-        self.left_disable_btn = QPushButton(tr("串口1失能电机"))
+        # 主动臂失能电机按钮
+        self.left_disable_btn = QPushButton(tr("主动臂失能电机"))
         self.left_disable_btn.setMinimumSize(100, 35)
         self.left_disable_btn.setStyleSheet("""
             QPushButton {
@@ -2615,8 +2681,8 @@ class EZToolUI(QMainWindow):
         separator_label.setStyleSheet("color: #ccc; font-size: 20px; margin: 0 5px;")
         buttons_row.addWidget(separator_label)
 
-        # 串口2中位校准按钮
-        self.right_calib_btn = QPushButton(tr("串口2中位校准"))
+        # 从动臂中位校准按钮
+        self.right_calib_btn = QPushButton(tr("从动臂中位校准"))
         self.right_calib_btn.setMinimumSize(100, 35)
         self.right_calib_btn.setStyleSheet("""
             QPushButton {
@@ -2638,11 +2704,11 @@ class EZToolUI(QMainWindow):
                     stop:0 #303f9f, stop:1 #283593);
             }
         """)
-        self.right_calib_btn.clicked.connect(self.run_quick_calibration_right)
+        self.right_calib_btn.clicked.connect(self.run_follower_calibration)
         buttons_row.addWidget(self.right_calib_btn)
 
-        # 串口2中位测试按钮
-        self.right_test_btn = QPushButton(tr("串口2中位测试"))
+        # 从动臂中位测试按钮
+        self.right_test_btn = QPushButton(tr("从动臂中位测试"))
         self.right_test_btn.setMinimumSize(100, 35)
         self.right_test_btn.setStyleSheet("""
             QPushButton {
@@ -2667,8 +2733,8 @@ class EZToolUI(QMainWindow):
         self.right_test_btn.clicked.connect(self.run_quick_test_right)
         buttons_row.addWidget(self.right_test_btn)
 
-        # 串口2失能电机按钮
-        self.right_disable_btn = QPushButton(tr("串口2失能电机"))
+        # 从动臂失能电机按钮
+        self.right_disable_btn = QPushButton(tr("从动臂失能电机"))
         self.right_disable_btn.setMinimumSize(100, 35)
         self.right_disable_btn.setStyleSheet("""
             QPushButton {
@@ -2718,7 +2784,7 @@ class EZToolUI(QMainWindow):
         # 创建状态栏（必须先创建，因为标签页初始化会使用 status_bar）
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage(tr("双串口系统已启动 - 左右独立操作 + 中间值校准"))
+        self.status_bar.showMessage(tr("双串口系统已启动 - 主动/从动独立操作 + 中间值校准"))
 
         # 创建标签页
         self.tab_widget = QTabWidget()
@@ -2794,7 +2860,7 @@ class EZToolUI(QMainWindow):
     def init_connections(self):
         """初始化信号连接"""
         # 添加初始日志
-        self.status_bar.showMessage(tr("双串口系统已启动 - 左右独立操作 + 中间值校准"), 3000)
+        self.status_bar.showMessage(tr("双串口系统已启动 - 主动/从动独立操作 + 中间值校准"), 3000)
 
     def toggle_remote_control(self):
         """切换遥控操作"""
@@ -2926,7 +2992,7 @@ class EZToolUI(QMainWindow):
 
     def run_quick_calibration(self, port_name: str):
         """快速中位校准 - 非阻塞执行"""
-        self.add_remote_log(tr("🔧 开始{}快速中位校准...").format(port_name))
+        self.add_remote_log(tr("🔧 开始{}快速中位校准...").format(port_name), port_name=port_name)
         self.status_bar.showMessage(tr("正在执行{}中位校准...").format(port_name), 5000)
 
         # 先终止该端口上一个仍在运行的工具进程，确保能拿到串口
@@ -2934,10 +3000,10 @@ class EZToolUI(QMainWindow):
 
         # 先停止相应端口的工作线程，避免端口冲突
         if port_name == self.left_port and self.left_panel.worker.is_connected:
-            self.add_remote_log(tr("⏸️ 已停止{}扫描线程，准备校准").format(port_name))
+            self.add_remote_log(tr("⏸️ 已停止{}扫描线程，准备校准").format(port_name), port_name=port_name)
             self.left_panel.worker.stop()
         elif port_name == self.right_port and self.right_panel.worker.is_connected:
-            self.add_remote_log(tr("⏸️ 已停止{}扫描线程，准备校准").format(port_name))
+            self.add_remote_log(tr("⏸️ 已停止{}扫描线程，准备校准").format(port_name), port_name=port_name)
             self.right_panel.worker.stop()
 
         # 等待端口释放
@@ -2950,24 +3016,14 @@ class EZToolUI(QMainWindow):
         thread.daemon = True
         thread.start()
 
-        self.add_remote_log(tr("📝 {}校准进程已启动，请等待执行完成").format(port_name))
+        self.add_remote_log(tr("📝 {}校准进程已启动，请等待执行完成").format(port_name), port_name=port_name)
 
     def _execute_quick_calibration(self, port_name: str, gen: int):
         """执行快速中位校准的线程函数"""
         try:
             self.add_remote_log(tr("🔍 查找校准脚本..."))
-            # 使用 -m 模块方式运行，确保能找到 scservo_sdk
-
-            # 检查使用哪个脚本
-            tools_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'tools')
-            quick_script = os.path.join(tools_dir, 'servo_quick_calibration.py')
-
-            if os.path.exists(quick_script):
-                self.add_remote_log(tr("✅ 找到校准脚本: servo_quick_calibration.py"))
-                command = [sys.executable, '-m', 'src.tools.servo_quick_calibration', port_name]
-            else:
-                self.add_remote_log(tr("⚠️ 未找到servo_quick_calibration.py，使用servo_middle_calibration.py"))
-                command = [sys.executable, '-m', 'src.tools.servo_middle_calibration', port_name, "2"]  # 使用自动模式
+            self.add_remote_log(tr("✅ 找到校准脚本: servo_quick_calibration.py"))
+            command = build_tool_command('servo_quick_calibration', port_name)
 
             self.add_remote_log(tr("🚀 启动校准进程: {}").format(' '.join(command)))
 
@@ -2979,7 +3035,7 @@ class EZToolUI(QMainWindow):
                 encoding='utf-8',
                 errors='replace',
                 bufsize=1,
-                cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+                cwd=child_workdir()
             )
             self._register_tool_process(port_name, process)
 
@@ -2996,7 +3052,7 @@ class EZToolUI(QMainWindow):
                             print(f"[{port_name} CALIB] {line}")
                             # 只显示包含重要关键词的日志
                             if any(keyword in line for keyword in important_keywords):
-                                self.add_remote_log(f"[{port_name}] {line}")
+                                self.add_remote_log(f"[{port_name}] {line}", port_name=port_name)
                 except:
                     break
 
@@ -3048,7 +3104,7 @@ class EZToolUI(QMainWindow):
 
     def run_quick_test(self, port_name: str):
         """快速中位测试 - 非阻塞执行"""
-        self.add_remote_log(tr("🧪 开始{}中位测试...").format(port_name))
+        self.add_remote_log(tr("🧪 开始{}中位测试...").format(port_name), port_name=port_name)
         self.status_bar.showMessage(tr("正在执行{}中位测试...").format(port_name), 5000)
 
         # 先终止该端口上一个仍在运行的工具进程，确保能拿到串口
@@ -3071,13 +3127,12 @@ class EZToolUI(QMainWindow):
         thread.daemon = True
         thread.start()
 
-        self.add_remote_log(tr("📝 {}测试进程已启动，请等待执行完成").format(port_name))
+        self.add_remote_log(tr("📝 {}测试进程已启动，请等待执行完成").format(port_name), port_name=port_name)
 
     def _execute_quick_test(self, port_name: str, gen: int):
         """执行快速中位测试的线程函数"""
         try:
-            # 使用 -m 模块方式运行，确保能找到 scservo_sdk
-            command = [sys.executable, '-m', 'src.tools.servo_center_test', port_name]
+            command = build_tool_command('servo_center_test', port_name)
 
             process = subprocess.Popen(
                 command,
@@ -3087,7 +3142,7 @@ class EZToolUI(QMainWindow):
                 encoding='utf-8',
                 errors='replace',
                 bufsize=1,
-                cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+                cwd=child_workdir()
             )
             self._register_tool_process(port_name, process)
 
@@ -3108,10 +3163,10 @@ class EZToolUI(QMainWindow):
                 self.add_remote_log(tr("ℹ️ {}中位测试已被新操作中断/取代").format(port_name))
                 return
             if return_code == 0:
-                self.add_remote_log(tr("✅ {}中位测试完成").format(port_name))
+                self.add_remote_log(tr("✅ {}中位测试完成").format(port_name), port_name=port_name)
                 self._tool_panel_log(port_name, tr("✅ {}中位测试完成（力矩保持开启，点“失能电机”可松开）").format(port_name))
             else:
-                self.add_remote_log(tr("❌ {}中位测试失败").format(port_name))
+                self.add_remote_log(tr("❌ {}中位测试失败").format(port_name), port_name=port_name)
                 self._tool_panel_log(port_name, tr("❌ {}中位测试失败 - 退出码: {}").format(port_name, return_code))
 
             # 重新启动相应端口的扫描线程
@@ -3144,7 +3199,7 @@ class EZToolUI(QMainWindow):
 
     def run_quick_disable(self, port_name: str):
         """快速失能电机 - 非阻塞执行"""
-        self.add_remote_log(tr("⏹️ 开始{}失能电机...").format(port_name))
+        self.add_remote_log(tr("⏹️ 开始{}失能电机...").format(port_name), port_name=port_name)
         self.status_bar.showMessage(tr("正在执行{}失能电机...").format(port_name), 5000)
 
         # 先终止该端口上一个仍在运行的工具进程（如中位测试），确保能拿到串口。
@@ -3168,13 +3223,12 @@ class EZToolUI(QMainWindow):
         thread.daemon = True
         thread.start()
 
-        self.add_remote_log(tr("📝 {}失能进程已启动，请等待执行完成").format(port_name))
+        self.add_remote_log(tr("📝 {}失能进程已启动，请等待执行完成").format(port_name), port_name=port_name)
 
     def _execute_quick_disable(self, port_name: str, gen: int):
         """执行快速失能电机的线程函数"""
         try:
-            # 使用 -m 模块方式运行，确保能找到 scservo_sdk
-            command = [sys.executable, '-m', 'src.tools.servo_disable', port_name]
+            command = build_tool_command('servo_disable', port_name)
 
             self.add_remote_log(tr("🚀 启动失能进程: {}").format(' '.join(command)))
             print(f"[DEBUG DISABLE] Port name: {port_name}")
@@ -3188,7 +3242,7 @@ class EZToolUI(QMainWindow):
                 encoding='utf-8',
                 errors='replace',
                 bufsize=1,
-                cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+                cwd=child_workdir()
             )
             self._register_tool_process(port_name, process)
 
@@ -3205,7 +3259,7 @@ class EZToolUI(QMainWindow):
                             print(f"[{port_name} DISABLE] {line}")
                             # 只显示包含重要关键词的日志
                             if any(keyword in line for keyword in important_keywords):
-                                self.add_remote_log(f"[{port_name}] {line}")
+                                self.add_remote_log(f"[{port_name}] {line}", port_name=port_name)
                             # 失败/错误类信息同时写到面板日志，避免用户看不到原因
                             if "❌" in line or "无法打开" in line or "错误" in line or "Cannot open" in line or "Error" in line or "Fail" in line:
                                 self._tool_panel_log(port_name, line)
@@ -3257,8 +3311,12 @@ class EZToolUI(QMainWindow):
             except:
                 pass
 
-    def add_remote_log(self, message):
-        """添加遥控日志"""
+    def add_remote_log(self, message, port_name=None):
+        """打印一条操作日志。
+
+        port_name 给出时同时写入该端口面板的「操作日志」——否则这些消息只进
+        控制台和状态栏，界面上根本看不到（打包成 exe 后连控制台都没有）。
+        """
         timestamp = time.strftime("%H:%M:%S")
         log_entry = f"[REMOTE] {message}"
         try:
@@ -3266,6 +3324,8 @@ class EZToolUI(QMainWindow):
         except UnicodeEncodeError:
             # GBK 控制台下 emoji 无法编码，降级为可显示字符，避免整个按钮动作被异常打断
             print(f"[REMOTE] {log_entry.encode('gbk', 'replace').decode('gbk')}")
+        if port_name:
+            self._tool_panel_log(port_name, message)
         self.status_bar.showMessage(tr("遥控: {}").format(message), 3000)
 
     @staticmethod
@@ -3318,18 +3378,13 @@ class EZToolUI(QMainWindow):
         新进程启动时会读取 settings.json 中已写入的语言配置，
         从而以新语言加载整个界面。
 
-        注意：工作目录固定在项目根目录 PROJECT_ROOT，
-        且模块顶部已基于 ``__file__`` 注入项目根 / scservo_sdk 到 sys.path，
-        因此无论从哪个目录、以哪种方式（脚本 / -m）启动，新进程都能找到依赖。
+        注意：重启命令与工作目录由 src.launcher 统一决定，
+        源码模式定位到脚本、冻结模式直接重启 exe，
+        因此无论从哪个目录、以哪种方式（脚本 / -m / exe）启动，新进程都能起来。
         """
         try:
-            script = getattr(sys.modules.get("__main__"), "__file__", None)
-            if script:
-                cmd = [sys.executable, os.path.abspath(script)]
-            else:
-                # -m 方式启动时 __main__ 没有 __file__，用当前模块的 __file__ 定位脚本
-                cmd = [sys.executable, os.path.abspath(__file__)]
             # 保留原有启动参数，但剔除 --lang，让配置文件决定重启后的语言
+            keep = []
             skip_next = False
             for arg in sys.argv[1:]:
                 if skip_next:
@@ -3340,10 +3395,10 @@ class EZToolUI(QMainWindow):
                     continue
                 if arg.startswith("--lang="):
                     continue
-                cmd.append(arg)
+                keep.append(arg)
             subprocess.Popen(
-                cmd,
-                cwd=PROJECT_ROOT,
+                build_restart_command(keep),
+                cwd=child_workdir(),
                 close_fds=False,
             )
         except Exception as e:
@@ -3469,7 +3524,7 @@ class EZToolUI(QMainWindow):
         if port_name != ServoPanel.DISABLED_PORT and port_name == self.right_port:
             QMessageBox.warning(
                 self, tr("端口冲突"),
-                tr("串口2 已经在使用 {}，不能重复选择同一串口。").format(port_name)
+                tr("从动臂串口 已经在使用 {}，不能重复选择同一串口。").format(port_name)
             )
             # 恢复左下拉框到之前的状态
             self.left_port_combo.blockSignals(True)
@@ -3491,7 +3546,7 @@ class EZToolUI(QMainWindow):
             self.left_panel.worker = None
             # 清空舵机列表显示，避免拔掉设备后仍显示旧数据
             self.left_panel.update_status([], False, self.left_panel.port_id)
-            self.status_bar.showMessage(tr("串口1已禁用"), 3000)
+            self.status_bar.showMessage(tr("主动臂串口已禁用"), 3000)
             return
 
         self.left_port = port_name
@@ -3515,7 +3570,7 @@ class EZToolUI(QMainWindow):
         # 启动新的工作线程
         self.left_panel.worker.start()
 
-        self.status_bar.showMessage(tr("串口1已切换到: {}").format(port_name), 3000)
+        self.status_bar.showMessage(tr("主动臂串口已切换到: {}").format(port_name), 3000)
 
     def on_right_port_changed(self, port_name):
         """右串口选择改变"""
@@ -3528,7 +3583,7 @@ class EZToolUI(QMainWindow):
         if port_name != ServoPanel.DISABLED_PORT and port_name == self.left_port:
             QMessageBox.warning(
                 self, tr("端口冲突"),
-                tr("串口1 已经在使用 {}，不能重复选择同一串口。").format(port_name)
+                tr("主动臂串口 已经在使用 {}，不能重复选择同一串口。").format(port_name)
             )
             # 恢复右下拉框到之前的状态
             self.right_port_combo.blockSignals(True)
@@ -3550,7 +3605,7 @@ class EZToolUI(QMainWindow):
             self.right_panel.worker = None
             # 清空舵机列表显示，避免拔掉设备后仍显示旧数据
             self.right_panel.update_status([], False, self.right_panel.port_id)
-            self.status_bar.showMessage(tr("串口2已禁用"), 3000)
+            self.status_bar.showMessage(tr("从动臂串口已禁用"), 3000)
             return
 
         self.right_port = port_name
@@ -3567,31 +3622,115 @@ class EZToolUI(QMainWindow):
         # 启动新的工作线程
         self.right_panel.worker.start()
 
-        self.status_bar.showMessage(tr("串口2已切换到: {}").format(port_name), 3000)
+        self.status_bar.showMessage(tr("从动臂串口已切换到: {}").format(port_name), 3000)
 
     def run_quick_calibration_left(self):
-        """串口1快速中位校准"""
+        """主动臂快速中位校准"""
         self.run_quick_calibration(self.left_port)
 
     def run_quick_test_left(self):
-        """串口1快速中位测试"""
+        """主动臂快速中位测试"""
         self.run_quick_test(self.left_port)
 
     def run_quick_disable_left(self):
-        """串口1快速失能电机"""
+        """主动臂快速失能电机"""
         self.run_quick_disable(self.left_port)
 
     def run_quick_calibration_right(self):
-        """串口2快速中位校准"""
+        """从动臂快速中位校准"""
         self.run_quick_calibration(self.right_port)
 
     def run_quick_test_right(self):
-        """串口2快速中位测试"""
+        """从动臂快速中位测试"""
         self.run_quick_test(self.right_port)
 
     def run_quick_disable_right(self):
-        """串口2快速失能电机"""
+        """从动臂快速失能电机"""
         self.run_quick_disable(self.right_port)
+
+    def run_arm_calibration(self, port_name: str, arm_type: str, calib_id: str):
+        """打开 LeRobot 完整校准向导（逐个关节摆中位 + 扫行程）。
+
+        与快速中位校准不同：这里走完整流程，并把结果写回舵机 EEPROM，
+        使硬件与 JSON 一致。LeRobot 的 is_calibrated 是拿 JSON 与舵机寄存器
+        逐个比对的，两边一致它才不会每次连接都重新提示校准。
+        """
+        if not CALIBRATION_WIZARD_AVAILABLE:
+            self._tool_panel_log(port_name, tr("❌ 校准向导不可用，无法执行完整校准"))
+            return
+        if getattr(self, "_calib_dialog_open", False):
+            return
+        if not port_name:
+            self.status_bar.showMessage(tr("请先选择端口"), 3000)
+            return
+
+        arm_label = tr("主动臂") if arm_type == "leader" else tr("从动臂")
+        self._calib_dialog_open = True
+        stopped_panels = []
+        try:
+            self._begin_tool_action(port_name)
+            # 模态对话框跑的是嵌套事件循环，2 秒一次的端口刷新定时器照常触发，
+            # 会重新 openPort 抢掉向导正持有的串口，必须先停掉
+            self.stop_port_refresh()
+
+            self.status_bar.showMessage(
+                tr("正在释放{}串口，准备打开校准向导...").format(arm_label), 5000)
+            self._tool_panel_log(
+                port_name, tr("🧭 {}完整校准开始，请按向导提示操作").format(arm_label))
+
+            # 向导自己 openPort，而 Windows 下串口独占，先把这个端口的持有者放掉
+            panel = self.left_panel if port_name == self.left_port else self.right_panel
+            if panel is not None and panel.worker is not None and panel.worker.is_connected:
+                panel.worker.stop()
+                stopped_panels.append(panel)
+
+            if self.remote_worker and self.remote_worker.running:
+                self.remote_worker.stop_remote_control()
+
+            if hasattr(self, 'ft_panel') and self.ft_panel.worker.is_connected:
+                self.ft_panel.worker.disconnect_serial()
+
+            time.sleep(1.0)
+
+            dialog = CalibrationWizard(
+                port_name, arm_type, fixed_id=calib_id, lock_id=True, auto_save=True, parent=self)
+
+            if not getattr(dialog, "connected", False):
+                self._tool_panel_log(
+                    port_name, tr("❌ {}完整校准未能连接串口，已取消").format(arm_label))
+                dialog.close()
+                return
+
+            dialog.exec()
+
+            if dialog.saved_path:
+                self._tool_panel_log(
+                    port_name,
+                    tr("✅ {}校准文件已保存: {}（ID: {}）").format(
+                        arm_label, dialog.saved_path, dialog.saved_id),
+                )
+            else:
+                self._tool_panel_log(
+                    port_name, tr("ℹ️ {}完整校准未保存校准文件").format(arm_label))
+
+        except Exception as e:
+            self._tool_panel_log(port_name, tr("❌ {}完整校准异常: {}").format(arm_label, e))
+        finally:
+            self._calib_dialog_open = False
+            for stopped in stopped_panels:
+                try:
+                    stopped.worker.start()
+                except Exception:
+                    pass
+            self.start_port_refresh()
+
+    def run_leader_calibration(self):
+        """主动臂完整校准"""
+        self.run_arm_calibration(self.left_port, "leader", "my_leader_arm")
+
+    def run_follower_calibration(self):
+        """从动臂完整校准"""
+        self.run_arm_calibration(self.right_port, "follower", "my_follower_arm")
 
     def closeEvent(self, event):
         """关闭事件"""
@@ -3653,8 +3792,8 @@ def main():
 
     # 解析命令行参数
     parser = argparse.ArgumentParser(description=tr('双串口工厂舵机标定工具'))
-    parser.add_argument('--port1', type=str, help=tr('指定串口1 (例如: COM1 或 /dev/ttyUSB0)'))
-    parser.add_argument('--port2', type=str, help=tr('指定串口2 (例如: COM2 或 /dev/ttyUSB1)'))
+    parser.add_argument('--port1', type=str, help=tr('指定主动臂串口 (例如: COM1 或 /dev/ttyUSB0)'))
+    parser.add_argument('--port2', type=str, help=tr('指定从动臂串口 (例如: COM2 或 /dev/ttyUSB1)'))
     parser.add_argument('--list-ports', action='store_true', help=tr('列出可用串口并退出'))
     parser.add_argument('--lang', choices=['zh', 'en'], default=None,
                         help=tr('界面语言 (zh=中文, en=English)，不指定则启动时选择'))
@@ -3743,8 +3882,8 @@ def main():
 
     print(tr("启动双串口工厂舵机标定工具"))
     print(tr("系统: {}").format(system))
-    print(tr("串口1: {}").format(left_port))
-    print(tr("串口2: {}").format(right_port))
+    print(tr("主动臂串口: {}").format(left_port))
+    print(tr("从动臂串口: {}").format(right_port))
 
     # 检查可用端口
     try:

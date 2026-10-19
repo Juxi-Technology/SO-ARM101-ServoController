@@ -91,6 +91,8 @@ python setup.py
 ## 7. Launch GUI
 
 ```bash
+python main.py
+# or
 python -m src.gui.factory_calibration_tool
 ```
 
@@ -105,10 +107,18 @@ python -m src.gui.factory_calibration_tool --port1 /dev/cu.usbserial-0001 --port
 ## 8. Interface Workflow
 
 ### 8.1 Servo Calibration Tab
-Select port, auto-scan servos; middle calibration / middle test / disable servos.
+Select the leader/follower port; servos are scanned automatically.
+
+- Center calibration opens the LeRobot calibration wizard: live monitor on the left (ID / Pos / slider), calibration table on the right.
+- **Start Recording Middle** → pose the arm at its center → **Finish Recording Middle**; then **Record Range** (turns green) → sweep every joint limit to limit, including the gripper → click again to stop.
+- Once all six joints are complete the calibration file is saved automatically and overwrites the previous one.
+
+> ⚠️ Sweep both arms over the same travel, otherwise the follower's motion will not match the leader's.
 
 ### 8.2 Single Servo Control Tab
-Slider position control, torque switch.
+- Each row: ID / Pos / slider / L (target)
+- **Pos and the slider are two-way bound**: dragging updates Pos; typing into Pos moves the slider and sends the command immediately
+- The command is sent on release, not while dragging
 
 ### 8.3 FT Debugger Tab
 - Serial connection (1M default), scan servos
@@ -120,9 +130,9 @@ Slider position control, torque switch.
 
 ### 8.4 Remote Control
 
-> ⚠️ **Direction: Port1 controls Port2**. Port1 (master) reads angles, Port2 (slave) is synchronized. Requires matching IDs on both ports.
+> ⚠️ **Direction: the leader arm controls the follower arm**. The leader arm (master) reads angles; the follower arm (slave) is synchronized. Requires matching IDs on both ports.
 
-Top bar `🎮 Remote`: Port1 reads → Port2 controls (matching servo IDs required on both ports)
+Top bar `🎮 Remote`: leader reads → follower controls (matching servo IDs required on both ports)
 ## 9. Troubleshooting
 
 | Problem | Solution |

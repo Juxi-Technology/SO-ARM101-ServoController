@@ -7,7 +7,7 @@ TRANSLATIONS = {
     "LeRobot 校准向导 - {}": "LeRobot Calibration Wizard - {}",
     " (基于现有文件)": " (Based on Existing File)",
     "🦾 LeRobot 校准向导 - {}": "🦾 LeRobot Calibration Wizard - {}",
-    "领导臂": "Leader Arm",
+    "主动臂": "Leader Arm",
     "从动臂": "Follower Arm",
 
     # 状态栏
@@ -17,7 +17,7 @@ TRANSLATIONS = {
         "Serial port: {} | Connected | Loaded data for {} joints | Select a joint to re-record and overwrite",
     "正在记录 {} 的运动范围...": "Recording the range of {}...",
     "已记录 {} 中位和范围（连续旋转）": "Recorded middle and range for {} (continuous rotation)",
-    "已记录 {} 中位值: {}": "Recorded middle value for {}: {}",
+    "已记录 {} 中位值: {}（偏移 {}）": "Recorded middle value for {}: {} (offset {})",
     "{} 范围记录完成: [{}, {}]": "{} range recording complete: [{}, {}]",
     "校准文件已保存: {}": "Calibration file saved: {}",
 
@@ -28,6 +28,31 @@ TRANSLATIONS = {
     "最小值": "Min",
     "最大值": "Max",
     "状态": "Status",
+    "ID": "ID",
+    "实时位置": "Live Positions",
+    "校准数据": "Calibration Data",
+    "待记录": "Pending",
+    "已记中位": "Middle recorded",
+    "记录中": "Recording",
+    "完成": "Done",
+    "未连接": "Disconnected",
+    "记录中位值": "Record Middle Values",
+    "开始中位值记录": "Start Recording Middle",
+    "完成中位值记录": "Finish Recording Middle",
+    "正在记录中位值，摆好后点【完成中位值记录】":
+        "Recording the middle values; pose the arm, then click [Finish Recording Middle]",
+    "请先完成中位值记录": "Finish recording the middle values first",
+    "记录运动范围": "Record Range",
+    "停止记录范围": "Stop Recording Range",
+    "请先停止记录运动范围": "Stop recording the range first",
+    "请先记录中位值": "Record the middle values first",
+    "以下舵机没有读到位置，无法记录中位：{}":
+        "Cannot read the position of these servos, so the middle cannot be recorded: {}",
+    "已记录 {} 个舵机的中位值": "Recorded the middle value for {} servos",
+    "中位值写入失败：{}": "Failed to write the middle values: {}",
+    "正在记录运动范围，请依次移动各关节":
+        "Recording the ranges; move each joint in turn",
+    "运动范围记录完成": "Range recording complete",
     "未校准": "Not Calibrated",
     "✅ 完成": "✅ Done",
     "📝 已记录中位": "📝 Middle Recorded",
@@ -97,11 +122,20 @@ TRANSLATIONS = {
         "Cannot read the position of servo ID{}.\nPossible causes:\n1. The servo is not connected or not powered\n2. The serial port is occupied by another program\n3. The background reader has not received data yet (wait a few seconds and retry)",
     "当前无法读取舵机 ID{} 的位置。\n请检查连接后重试。":
         "Cannot read the position of servo ID{}.\nCheck the connection and retry.",
-    "以下关节尚未完成校准:\n{}\n\n未完成关节将使用默认值（中位=2048, 范围=[0,4095]）。\n是否继续保存？":
-        "The following joints have not been calibrated:\n{}\n\nUncalibrated joints will use default values (middle=2048, range=[0,4095]).\nContinue saving?",
-    "校准文件已保存:\n{}\n\n可以在 LeRobot 中使用 ID: {}":
-        "Calibration file saved:\n{}\n\nYou can use ID {} in LeRobot",
+    "以下关节尚未完成校准:\n{}\n\n未完成关节将使用默认值（中位偏移=0, 范围=[0,4095]）。\n是否继续保存？":
+        "The following joints have not been calibrated:\n{}\n\nUncalibrated joints will use default values (middle offset=0, range=[0,4095]).\nContinue saving?",
+    "{}校准文件已保存:\n{}\n\nID: {}":
+        "{0} calibration file saved:\n{1}\n\nID: {2}",
     "保存校准文件失败: {}": "Failed to save calibration file: {}",
+    "尚未保存": "Not saved yet",
+    "校准尚未完成，是否保存当前数据？\n将覆盖同 ID 的已有校准文件。":
+        "The calibration is not complete. Save the current data?\nThe existing calibration file with the same ID will be overwritten.",
+    "以下关节的参数未能写回舵机，LeRobot 可能仍提示未校准：{}":
+        "These joints could not be written back to the servos; LeRobot may still report the arm as uncalibrated: {}",
+    "以下舵机的校准复位失败，本次校准结果可能不准：{}":
+        "Calibration reset failed on these servos, so this calibration may be inaccurate: {}",
+    "ID{} 的中位偏移写入失败，LeRobot 可能仍提示未校准：{}":
+        "Failed to write the middle offset for ID{}; LeRobot may still report the arm as uncalibrated: {}",
 
     # 调试输出
     "[DEBUG] 读取 ID{} 失败: result={}, error={}": "[DEBUG] Failed to read ID{}: result={}, error={}",

@@ -16,6 +16,7 @@ import sys
 import os
 import time
 import json
+import argparse
 import threading
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -41,6 +42,8 @@ except ImportError as e:
 try:
     from src.port_utils import select_port_interactive, list_ports_for_user
     from src.calibration_manager import CalibrationManager, JOINT_NAME_MAP
+    from src.calibration_math import HALF_TURN, homing_offset_from_position
+    from src.servo_eeprom import reset_calibration, write_calibration_to_servos
 except ImportError:
     print(tr("❌ 错误: 无法导入项目工具模块"))
     sys.exit(1)
@@ -114,9 +117,11 @@ def calibrate_joint(servo_handler, servo_id: int, joint_name: str) -> Dict:
 
     homing_offset = read_position(servo_handler, servo_id)
     if homing_offset is None:
-        print(tr("❌ 无法读取 ID{} 位置，使用默认值 2048").format(servo_id))
-        homing_offset = 2048
+        print(tr("❌ 无法读取 ID{} 位置，使用默认值 0").format(servo_id))
+        homing_offset = 0
     else:
+        # LeRobot 的 homing_offset 是「中位原始位置 - 2047」这个增量，不是原始位置本身
+        homing_offset = homing_offset_from_position(homing_offset)
         print(tr("✅ 中位已记录 / Homing offset recorded: {}\n").format(homing_offset))
 
     # 步骤 2：记录运动范围
@@ -220,12 +225,28 @@ def calibrate_arm(port_name: str, save_path: str, arm_type: str = "follower") ->
     enable_torque(servo_handler, calib_servos, enable=False)
     print(tr("💡 所有待校准舵机已失能，可以手动移动\n"))
 
+    # 清零运动偏移、放开角度限位（等价 LeRobot 的 reset_calibration）。
+    # 必须在记录中位之前做：偏移清零后读到的位置才是"未加偏移"的原始位置，
+    # 算出的 homing_offset 才与 LeRobot 口径一致，行程读数也才在同一坐标系里。
+    print(tr("🧹 正在复位舵机校准参数（偏移清零、限位放开）..."))
+    reset_failures = reset_calibration(servo_handler, calib_servos)
+    if reset_failures:
+        print(tr("⚠️ 以下舵机复位失败，本次校准结果可能不准：{}").format(
+            ', '.join("ID{}".format(sid) for sid, _ in reset_failures)))
+
     # 逐个校准
     calibration_data = {}
     for servo_id in sorted(calib_servos):
         joint_name = ID_TO_JOINT[servo_id]
         joint_calib = calibrate_joint(servo_handler, servo_id, joint_name)
         calibration_data[joint_name] = joint_calib
+
+    # 先把参数写回舵机：LeRobot 的 is_calibrated 是拿 JSON 与舵机寄存器逐个比对，
+    # 两边一致它才不会每次连接都重新提示校准
+    write_failures = write_calibration_to_servos(servo_handler, calibration_data)
+    if write_failures:
+        print(tr("⚠️ 以下关节的参数未能写回舵机，LeRobot 可能仍提示未校准：{}").format(
+            ', '.join(write_failures)))
 
     # 保存校准文件
     try:
@@ -250,7 +271,9 @@ def calibrate_arm(port_name: str, save_path: str, arm_type: str = "follower") ->
             print(tr("🎯 移动到中位..."))
             for servo_id in sorted(calib_servos):
                 joint_name = ID_TO_JOINT[servo_id]
-                target = calibration_data[joint_name]["homing_offset"]
+                # 中位在归一化坐标里就是半圈处；homing_offset 已是增量且已写进舵机，
+                # 不能再拿它当绝对位置用
+                target = HALF_TURN
                 servo_handler.WritePosEx(servo_id, target, 1000, 50)
                 time.sleep(0.05)
 
@@ -261,7 +284,9 @@ def calibrate_arm(port_name: str, save_path: str, arm_type: str = "follower") ->
             print("-" * 60)
             for servo_id in sorted(calib_servos):
                 joint_name = ID_TO_JOINT[servo_id]
-                target = calibration_data[joint_name]["homing_offset"]
+                # 中位在归一化坐标里就是半圈处；homing_offset 已是增量且已写进舵机，
+                # 不能再拿它当绝对位置用
+                target = HALF_TURN
                 pos = read_position(servo_handler, servo_id)
                 if pos is not None:
                     diff = pos - target
@@ -329,7 +354,7 @@ def main():
         if args.id:
             file_id = args.id
         else:
-            default_name = "my_awesome_leader_arm" if args.arm_type == 'leader' else "my_awesome_follower_arm"
+            default_name = "my_leader_arm" if args.arm_type == 'leader' else "my_follower_arm"
             try:
                 file_id = input(tr("请输入校准文件 ID（直接回车使用 {}）: ").format(default_name)).strip()
             except (EOFError, KeyboardInterrupt):
@@ -345,5 +370,4 @@ def main():
 
 
 if __name__ == "__main__":
-    import argparse
     main()

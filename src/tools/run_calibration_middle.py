@@ -8,8 +8,8 @@ Run servos to middle position based on LeRobot calibration file
     python run_calibration_middle.py <calibration_file> <port> [--mode zero|range]
     
 示例 / Examples:
-    python run_calibration_middle.py ~/.cache/huggingface/lerobot/calibration/teleoperators/so_leader/my_awesome_leader_arm.json /dev/ttyACM0
-    python run_calibration_middle.py ~/.cache/huggingface/lerobot/calibration/robots/so_follower/my_awesome_follower_arm.json /dev/ttyUSB0 --mode range
+    python run_calibration_middle.py ~/.cache/huggingface/lerobot/calibration/teleoperators/so_leader/my_leader_arm.json /dev/ttyACM0
+    python run_calibration_middle.py ~/.cache/huggingface/lerobot/calibration/robots/so_follower/my_follower_arm.json /dev/ttyUSB0 --mode range
 """
 
 import sys
@@ -55,6 +55,7 @@ except ImportError:
 # 引入校准文件管理器
 try:
     from src.calibration_manager import CalibrationManager, JOINT_NAME_MAP
+    from src.calibration_math import HALF_TURN
 except ImportError:
     print(tr("❌ 错误: 未找到 calibration_manager"))
     sys.exit(1)
@@ -83,7 +84,7 @@ def compute_middle_positions(data: dict, mode: str = "zero") -> dict:
 
     Args:
         data: 校准数据
-        mode: "zero" 使用 homing_offset, "range" 使用 range 中点
+        mode: "zero" 回校准零点（归一化坐标的半圈处），"range" 使用 range 中点
 
     Returns:
         {joint_name: target_position}
@@ -91,7 +92,9 @@ def compute_middle_positions(data: dict, mode: str = "zero") -> dict:
     middle_positions = {}
     for joint_name, joint_data in data.items():
         if mode == "zero":
-            target = joint_data.get("homing_offset", 2048)
+            # 归一化坐标里的中位就是半圈处。homing_offset 是 LeRobot 口径的增量
+            # 且已写进舵机、由固件施加，不能再拿它当绝对目标（也不该再加 2047）
+            target = HALF_TURN
         elif mode == "range":
             range_min = joint_data.get("range_min", 0)
             range_max = joint_data.get("range_max", 4095)
@@ -133,7 +136,7 @@ def run_to_middle(port_name: str, calibration_path: str, mode: str = "zero") -> 
     print(f"{'='*60}")
     print(tr("校准文件 / Calibration: {}").format(calibration_path))
     print(tr("串口 / Port: {}").format(port_name))
-    print(tr("中位模式 / Mode: {}").format(tr("校准零点 (homing_offset)") if mode == 'zero' else tr("范围中点 (range midpoint)")))
+    print(tr("中位模式 / Mode: {}").format(tr("校准零点") if mode == 'zero' else tr("范围中点 (range midpoint)")))
     print(f"{'='*60}\n")
 
     # 加载校准文件
@@ -273,7 +276,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=tr("""
 中位模式说明 / Mode explanation:
-  zero  : 使用 homing_offset 作为中位（LeRobot 的零点）
+  zero  : 回到校准零点（归一化坐标的半圈处）
   range : 使用 (range_min + range_max) / 2 作为中位（物理范围中点）
         """)
     )

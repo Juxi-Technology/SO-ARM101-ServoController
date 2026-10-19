@@ -91,6 +91,8 @@ python setup.py
 ## 7. GUI starten
 
 ```bash
+python main.py
+# or
 python -m src.gui.factory_calibration_tool
 ```
 
@@ -105,10 +107,18 @@ python -m src.gui.factory_calibration_tool --port1 /dev/cu.usbserial-0001 --port
 ## 8. Oberflächen-Workflow
 
 ### 8.1 Tab Servokalibrierung
-Port auswählen, Servos automatisch scannen; Mittelpunktkalibrierung / Mittelpunkttest / Servos deaktivieren.
+Wählen Sie den Leader-/Follower-Port aus; Servos werden automatisch gescannt.
+
+- Die Mittelpunktkalibrierung öffnet den LeRobot-Kalibrierungsassistenten: Live-Anzeige links (ID / Pos / Slider), Kalibrierungstabelle rechts.
+- **Mittelpunkt aufzeichnen** → Arm in seinen Mittelpunkt stellen → **Mittelpunktaufzeichnung beenden**; dann **Bereich aufzeichnen** (wird grün) → jedes Gelenk von Grenze zu Grenze durchfahren, einschließlich des Greifers → erneut klicken zum Stoppen.
+- Sobald alle sechs Gelenke fertig sind, wird die Kalibrierungsdatei automatisch gespeichert und überschreibt die vorherige.
+
+> ⚠️ Fahren Sie beide Arme über denselben Verfahrweg durch, sonst stimmt die Bewegung des Followers nicht mit der des Leaders überein.
 
 ### 8.2 Tab Einzel-Servo-Steuerung
-Slider-Positionssteuerung, Drehmomentschalter.
+- Jede Zeile: ID / Pos / Slider / L (Zielposition)
+- **Pos und der Slider sind beidseitig gebunden**: Das Ziehen aktualisiert Pos; die Eingabe in Pos bewegt den Slider und sendet den Befehl sofort
+- Der Befehl wird beim Loslassen gesendet, nicht während des Ziehens
 
 ### 8.3 Tab FT-Debugger
 - Serielle Verbindung (Standard 1M), Servos scannen
@@ -120,9 +130,9 @@ Slider-Positionssteuerung, Drehmomentschalter.
 
 ### 8.4 Fernsteuerung
 
-> ⚠️ **Richtung: Port1 steuert Port2**. Port1 (Master) liest die Winkel, Port2 (Slave) wird synchronisiert. Erfordert übereinstimmende IDs an beiden Ports.
+> ⚠️ **Richtung: Der Leader-Arm steuert den Follower-Arm**. Der Leader-Arm (Master) liest die Winkel, der Follower-Arm (Slave) wird synchronisiert. Erfordert übereinstimmende IDs an beiden Ports.
 
-Obere Leiste `🎮 Fernsteuerung`: Port1 liest → Port2 steuert (übereinstimmende Servo-IDs an beiden Ports erforderlich)
+Obere Leiste `🎮 Fernsteuerung`: der Leader-Arm liest → der Follower-Arm steuert (übereinstimmende Servo-IDs an beiden Ports erforderlich)
 
 ## 9. Fehlerbehebung
 

@@ -12,7 +12,7 @@ GUI 启动时选择语言后写入该环境变量，子进程（CLI 工具）自
 
     print(tr("未发现可用串口"))
     # 带参数的字符串使用 format，保证字典 key 固定：
-    print(tr("串口1: {}").format(port))
+    print(tr("主动臂串口: {}").format(port))
 """
 
 import os

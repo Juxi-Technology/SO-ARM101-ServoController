@@ -70,8 +70,12 @@ Ports (COM & LPT)
 ## 6. Launch GUI
 
 ```bash
+python main.py
+# or
 python -m src.gui.factory_calibration_tool
 ```
+
+> **No-install option (Windows)**: double-click `dist\SO-ARM101-ServoController.exe`; the target machine needs no Python. Rebuild with `pyinstaller -y SO-ARM101-ServoController.spec` (install it first with `pip install pyinstaller`).
 
 Or specify ports (if occupied):
 
@@ -89,16 +93,25 @@ python -m src.gui.factory_calibration_tool --list-ports
 
 ### 7.1 Servo Calibration Tab
 
-1. Select Port1/Port2 in the top bar → auto-scan servos (ID 1-6)
+1. Select the leader/follower port in the top bar → servos are scanned automatically (ID 1-6).
 2. Common buttons:
-   - **Middle Calibration**: set current position as center 2048
-   - **Middle Test**: enable torque and move to center to verify
-   - **Disable Servos**: turn off torque for manual rotation
+   - **Leader/Follower Arm Center Calibration**: opens the LeRobot calibration wizard
+     - Left column: live monitor for all six servos (ID / Pos / slider)
+     - **Start Recording Middle** (turns orange) → pose the arm at its center → **Finish Recording Middle**
+     - **Record Range** (turns green) → sweep every joint limit to limit, including the gripper → click again to stop
+     - Once all six joints are complete the calibration file is saved automatically and overwrites the previous one, and the offsets/limits are written back to the servo EEPROM
+   - **Leader/Follower Arm Center Test**: enables torque and moves to the center to verify
+   - **Leader/Follower Arm Disable Motors**: disables torque for manual movement
+
+> ⚠️ Sweep both arms over the same travel, otherwise the follower's motion will not match the leader's during teleoperation.
 
 ### 7.2 Single Servo Control Tab
 
-- Drag slider → servo moves to target position on release
-- Torque switch controls individual servos
+- Each row: ID / Pos / slider / L (target)
+- **Pos and slider are two-way bound**: dragging the slider updates Pos; typing into Pos moves the slider and sends the command immediately
+- The command is sent on slider release, not continuously while dragging
+- While the servo moves, the slider and Pos follow the actual position
+- ⚡ Torque / 🎯 Center / 🧹 Clear limits act on that single servo
 
 ### 7.3 FT Debugger Tab
 
@@ -118,9 +131,9 @@ python -m src.gui.factory_calibration_tool --list-ports
 
 ### 7.4 Remote Control
 
-> ⚠️ **Direction: Port1 controls Port2**. Port1 (master) only reads servo angles, Port2 (slave) is synchronized. Requires matching servo IDs on both ports.
+> ⚠️ **Direction: the leader arm controls the follower arm**. The leader arm (master) only reads servo angles; the follower arm (slave) is synchronized. Requires matching servo IDs on both ports.
 
-- Top bar `🎮 Remote` button: Port1 reads → Port2 controls (same-ID servos)
+- Top bar `🎮 Remote` button: leader reads → follower controls (same-ID servos)
 - Click again to stop remote control
 
 ## 8. Troubleshooting

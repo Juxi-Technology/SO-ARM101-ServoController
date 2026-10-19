@@ -26,16 +26,17 @@ English | [简体中文](../zh-hans/README.md) | [繁體中文](../zh-hant/READM
 | ---- | ---- |
 | Automatic port detection | Identifies USB serial ports and filters out virtual devices |
 | Cross-platform support | Works on Windows / Ubuntu / macOS |
-| Dual-port synchronization | Left and right serial ports operate independently, with master/slave dual-port synchronized remote control |
+| Dual-port synchronization | The leader-arm and follower-arm ports operate independently, with leader/follower synchronized remote control |
 | Chinese/English toggle | Switch the interface between Chinese and English in one click; the choice is remembered |
-| Center calibration | Burns the servo's current position as the 2048 center (persisted to EEPROM) |
+| Single-servo center calibration | Burns one servo's current position as the 2048 center (persisted to EEPROM) |
 | Center test | Enables torque and moves the servos to the center to verify calibration |
 | Disable motors | Disables torque on all servos in one click for manual adjustment |
 | Auto-scan | Automatically detects every online servo with an ID in the 1–20 range |
 | Single-servo control | Real-time slider control of a single servo's position and torque switch |
 | FT debugger | Serial connection, scanning, parameter read/write, position control, baud-rate change, factory reset, xdat parameter backup |
 | xdat parameters | Save the current servo's EEPROM parameters / open a backup to restore |
-| LeRobot calibration | Generates LeRobot-format JSON calibration files |
+| LeRobot calibration | One-click full calibration for the leader / follower arm (pose center + sweep range), creating and overwriting the calibration file automatically |
+| Single-file build | PyInstaller packs everything into one exe; the target machine needs no Python, and every CLI tool is hosted in the same executable |
 | Run to center from a calibration file | Moves the arm to the center from a calibration file |
 
 ---
@@ -56,10 +57,10 @@ The main program contains three tabs:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  SoARM Calibration Suite   [Port1▾] [Port2▾] [🔄] [🎮 Remote][EN]│  ← Top bar
+│  SoARM Calib. Suite   [Leader▾] [Follower▾] [🔄] [🎮 Remote][EN]│  ← Top bar
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌─────────────────────────────┬──────────────────────────────┐ │
-│  │ Port 1 - Servo Calib.       │ Port 2 - Servo Calib.        │ │
+│  │ Leader - Servo Calib.       │ Follower - Servo Calib.      │ │
 │  │ [🔴 Not connected] Current:…│ [🔴 Not connected] Current:… │ │
 │  │ Servo 1–6 status table      │ Servo 1–6 status table       │ │
 │  │ [Center Cal][Center Test]…  │ [Center Cal][Center Test]…   │ │
@@ -67,9 +68,9 @@ The main program contains three tabs:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-- **Top bar**: application title, serial-port dropdowns, refresh button, remote-control button and language-toggle button.
-- **🦾 Tab 1 — Servo Calibration**: quick actions on the left and right panels (center calibration, center test, disable motors) plus live status.
-- **🎚️ Tab 2 — Single-Servo Control**: fine-tune the position of each online servo with a slider and toggle its torque.
+- **Top bar**: application title, leader/follower port dropdowns, refresh, remote control and language toggle.
+- **🦾 Tab 1 — Servo Calibration**: quick actions on the left and right panels (center calibration, center test, disable motors) plus live status. **Center calibration** opens the LeRobot calibration wizard (see section 2) for a one-shot whole-arm calibration.
+- **🎚️ Tab 2 — Single-Servo Control**: one row per servo — ID / Pos value / slider / L (target). Pos and the slider are **two-way bound**: dragging the slider updates Pos; typing a value into Pos moves the slider and immediately sends the position command.
 - **🔬 Tab 3 — FT Debugger**: serial connection, scanning, parameter read/write, position control, baud-rate / factory reset, and xdat parameter backup and restore.
 
 ---
@@ -90,12 +91,16 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-3. Check the environment and launch:
+3. Check the environment and launch (both entry points are equivalent):
 
 ```bash
 python setup.py
+python main.py
+# or
 python -m src.gui.factory_calibration_tool
 ```
+
+> **No-install option (Windows)**: double-click `dist\SO-ARM101-ServoController.exe` — no Python needed on the target machine. Rebuild with `pyinstaller -y SO-ARM101-ServoController.spec` (install it first with `pip install pyinstaller`). The same exe also hosts every command-line tool (see section 10).
 
 4. Confirm the COM port in Device Manager (for example `COM3`) and select it in the top bar. To specify the ports manually:
 
@@ -200,27 +205,52 @@ python -m src.tools.servo_remote_control
 
 > If the port is reported as busy, make sure no other program (a serial monitor, or a previous run of the tool that never exited) is holding it.
 
-### 2. Center calibration (set the current position to 2048)
+### 2. Center calibration (leader arm / follower arm)
 
 > Before calibrating, physically pose the arm so that each joint is at the "zero / center" position you want.
 
-1. Click the **Serial X Center Calibration** button on the panel.
-2. The program first disables the servos and prompts you to move them by hand to the desired center.
-3. Once you confirm, the program processes each servo: unlock EEPROM → write the calibration command (value 128 to address 40) → re-lock EEPROM.
-4. Verify with "Center Test": the servos should hold their position (moving only slightly), which confirms a successful calibration.
+The **Leader Arm Center Calibration** / **Follower Arm Center Calibration** buttons in the top bar open the LeRobot calibration wizard. The window has two columns: a live monitor on the left (ID / Pos / slider for all six servos) and the calibration table plus actions on the right.
+
+1. On connect the program disables torque and resets the servos: the homing offset is zeroed and the angle limits are opened to `[0, 4095]` (equivalent to LeRobot's `reset_calibration`).
+2. Click **Start Recording Middle** — the button turns orange and the "Middle Value" column starts **tracking the live Pos on the left**. Pose the arm at its standard center; once the readings are stable, click **Finish Recording Middle** to freeze the values and write them back to the servos (the file stores the delta `middle − 2047`).
+3. Click **Record Range** — the button turns green. **Move every joint from one limit to the other** (`wrist_roll` is a continuous-rotation joint with a fixed `[0,4095]` range; **sweep the gripper too**). The min/max columns update live. Click **Stop Recording Range** when done.
+4. Once all six joints are complete, the program **saves the calibration file automatically, overwriting any previous file with the same name**, and writes the offsets and limits back to the servo EEPROM — so LeRobot will no longer ask you to calibrate again.
+
+Save locations (fixed IDs):
+
+| Arm | Calibration file ID | Path |
+| --- | --- | --- |
+| Leader | `my_leader_arm` | `~/.cache/huggingface/lerobot/calibration/teleoperators/so_leader/my_leader_arm.json` |
+| Follower | `my_follower_arm` | `~/.cache/huggingface/lerobot/calibration/robots/so_follower/my_follower_arm.json` |
+
+> If you close the wizard early, it asks whether to save the current progress; choosing Yes also overwrites the same file.
+> The per-servo **🎯 Center** button still burns that servo's current position as 2048 (persisted to EEPROM) — that is a different operation from the whole-arm calibration above.
+
+> ⚠️ **Sweep both arms over the same travel**: teleoperation normalizes each arm against its own recorded range. If a joint is swept only half-way on one arm (e.g. shoulder_lift recorded over 107°) while the other records 208°, the follower moves almost twice as far as the leader and the resting poses do not line up. After calibrating, compare the range widths of the two arms and re-record any joint that differs a lot.
 
 ### 3. Center test
 
-1. Click **Serial X Center Test**.
+1. Click **Leader Arm Center Test** / **Follower Arm Center Test**.
 2. The program enables torque and moves all servos to 2048.
 3. If a servo barely moves from its current position, the calibration is correct; if it moves a lot, the calibration value is unreliable and must be redone.
 
 ### 4. Disable motors (manual adjustment)
 
-- Click **Serial X Disable Motors** to disable torque on every servo on that port, so they can be rotated freely by hand.
+- Click **Leader Arm Disable Motors** / **Follower Arm Disable Motors** to disable torque on every servo on that port, so they can be rotated freely by hand.
 - An individual servo can be toggled on the **Single-Servo Control** tab using the torque switch below its slider.
 
-### 5. Change a servo ID
+### 5. Single-servo control (slider / Pos)
+
+On the **🎚️ Single-Servo Control** tab each online servo gets a row:
+
+- **Pos field**: shows / accepts a target position (0–4095). **Editable**, two-way bound to the slider.
+- **Slider**: dragging updates Pos live; the position command is sent **on release**, not continuously while dragging.
+- **Typing into Pos**: Enter, focus-out or the spin buttons send the command immediately; keystrokes are not sent one digit at a time.
+- **L**: the most recently commanded target.
+- While the servo moves, the slider and Pos follow the **actual position**; they are not taken over while you are dragging or typing.
+- Each row also has **⚡ Torque**, **🎯 Center** and **🧹 Clear limits** for that single servo.
+
+### 6. Change a servo ID
 
 1. Open the **🔬 FT Debugger** tab, connect the serial port and scan for servos.
 2. Select the target servo, change its "Servo ID" value (address 0x05) in the parameter table and click Write.
@@ -228,12 +258,12 @@ python -m src.tools.servo_remote_control
 
 > ⚠️ Before changing an ID, always make sure this is the only servo on the bus to avoid ID conflicts.
 
-### 6. Change the baud rate / restore factory defaults
+### 7. Change the baud rate / restore factory defaults
 
 - **Change baud rate**: in the "Baud Rate / Factory Reset" area of the FT Debugger tab, select the new baud rate (38400 – 1000000 bps) and apply it. After the write, the serial baud rate switches automatically and is verified with a ping; on failure it rolls back automatically.
 - **Restore factory defaults**: the servo returns to its factory defaults (ID=1, baud rate=1000000); you must rescan afterwards.
 
-### 7. xdat parameter backup and restore
+### 8. xdat parameter backup and restore
 
 In the "xdat parameters (save EEPROM only)" area of the FT Debugger tab:
 
@@ -242,15 +272,15 @@ In the "xdat parameters (save EEPROM only)" area of the FT Debugger tab:
 3. **📂 Open xdat**: loads a backup file.
 4. **📤 Restore parameters to servo**: writes the backup back to the current servo's EEPROM.
 
-### 8. Dual-port synchronized remote control
+### 9. Dual-port synchronized remote control
 
-> ⚠️ **Direction note: Port 1 controls Port 2.** Port 1 (master) only reads servo angles; Port 2 (slave) is driven in sync.
+> ⚠️ **Direction note: the leader arm drives the follower arm.** The leader arm (master) only reads servo angles; the follower arm (slave) is driven in sync.
 
-1. In the top bar, click **🎮 Remote** (Port 1 reads angles → Port 2 drives the servos with the same IDs in sync).
+1. In the top bar, click **🎮 Remote** (the leader arm reads angles → the follower arm drives the servos with the same IDs in sync).
 2. The two ports must use matching servo IDs; only servos present on both are synchronized.
-3. Click the same button again to stop, after which the left and right panel scan threads resume automatically.
+3. Click the same button again to stop, after which both panel scan threads resume automatically.
 
-### 9. LeRobot calibration (command line)
+### 10. LeRobot calibration (command line)
 
 ```bash
 # Calibrate the follower arm (saved to ~/.cache/huggingface/lerobot/calibration/robots/so_follower/)
@@ -260,7 +290,11 @@ python -m src.tools.lerobot_calibrate --arm-type follower
 python -m src.tools.lerobot_calibrate --arm-type leader
 ```
 
-Procedure: disable the servos → pose each joint to the center and record `homing_offset` → slowly rotate through the full range to record `range_min/max` (`wrist_roll` is a continuous-rotation joint whose range is fixed at `[0,4095]`) → save the JSON.
+Procedure: disable the servos → reset the calibration parameters (offset zeroed, limits released) → pose each joint to the center and record `homing_offset` → slowly rotate through the full range to record `range_min/max` (`wrist_roll` is a continuous-rotation joint whose range is fixed at `[0,4095]`) → write the parameters back to the servos → save the JSON.
+
+`homing_offset` is LeRobot's **delta** (center raw position − 2047), not the raw position itself.
+
+> The **Leader Arm Center Calibration / Follower Arm Center Calibration** buttons in the GUI run the same procedure and save automatically to the fixed IDs on completion (see section 2 above).
 
 Run to center from a calibration file:
 
@@ -282,6 +316,8 @@ python -m src.tools.run_calibration_middle <calibration_file.json> --mode zero
 8. **Center calibration is irreversible**: the write overwrites the original offset and cannot be undone. Record the original position before calibrating.
 9. **ID-change risk**: if the write or the verification fails, the program reports an error and resumes scanning, but in extreme cases a servo may become "lost". If that happens, try "Restore factory defaults" (after which the ID returns to 1).
 10. **Encoding issues**: if emoji appear garbled in a Windows console, set `PYTHONIOENCODING=utf-8` before running the command-line tools. Linux/macOS use native UTF-8 and are normally unaffected.
+11. **Keep both arms' ranges consistent**: teleoperation normalizes each arm by its own recorded range. If one joint is swept only half-way on one arm while the other is swept fully, the follower's motion is noticeably larger than the leader's and the resting poses do not line up. Compare the range widths of the two arms and re-sweep any joint that differs a lot.
+12. **Sweep the gripper too**: the gripper is not a continuous-rotation joint. If you skip it, its range falls back to the default `[0,4095]` and its open/close travel will be wrong.
 
 ---
 
@@ -295,6 +331,9 @@ python -m src.tools.run_calibration_middle <calibration_file.json> --mode zero
 | Temperature rising too fast | Excessive load or a stalled joint | Check for mechanical binding and reduce speed/acceleration |
 | Servo not found after changing its ID | ID conflict or a failed write | Restore factory defaults and rescan |
 | Remote control out of sync | The IDs on the two ports differ | Confirm that servos with the same IDs are online on the master and slave ports |
+| Poses / travel mismatch during teleoperation | The two arms recorded very different range widths for some joint | Re-record that joint over its full travel so both arms match |
+| Gripper travel is wrong | The gripper was never swept; its range is the default `[0,4095]` | Re-record and sweep the gripper from limit to limit |
+| Pos does not update in the calibration wizard | The port is busy / a servo is not responding | Close the program holding the port; confirm all six servos are online |
 
 ---
 
@@ -308,6 +347,8 @@ SO-ARM101-ServoController/
 │       ├── Windows.md
 │       ├── Linux.md
 │       └── macOS.md
+├── main.py                  # Unified entry point (GUI / --run-tool subcommands)
+├── SO-ARM101-ServoController.spec   # PyInstaller single-file build config
 ├── src/
 │   ├── gui/                  # PySide6 graphical interface
 │   │   ├── factory_calibration_tool.py   # Main tool (dual-port calibration + remote control + language switch)
@@ -316,6 +357,9 @@ SO-ARM101-ServoController/
 │   │   ├── theme_utils.py                # Light theme
 │   │   └── language_dialog.py            # Language-selection dialog
 │   ├── tools/                # Command-line tools
+│   ├── launcher.py           # Child-process self-dispatch (tool calls in the packaged exe)
+│   ├── calibration_math.py   # homing_offset conversion and sign-magnitude encoding
+│   ├── servo_eeprom.py       # Writes calibration parameters back to EEPROM
 │   ├── xdat_utils.py         # xdat parameter file read/write
 │   ├── i18n*.py / i18n_translations/     # Chinese/English internationalization
 │   ├── port_utils.py         # Serial-port detection

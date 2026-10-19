@@ -91,6 +91,8 @@ python setup.py
 ## 7. Iniciar a GUI
 
 ```bash
+python main.py
+# ou
 python -m src.gui.factory_calibration_tool
 ```
 
@@ -105,10 +107,18 @@ python -m src.gui.factory_calibration_tool --port1 /dev/cu.usbserial-0001 --port
 ## 8. Fluxo de Trabalho da Interface
 
 ### 8.1 Aba de Calibração de Servos
-Selecione a porta, faça a varredura automática dos servos; calibração do meio / teste do meio / desabilitar servos.
+Selecione a porta do braço líder/seguidor; os servos são varridos automaticamente.
+
+- A calibração central abre o assistente de calibração LeRobot: monitor ao vivo à esquerda (ID / Pos / controle deslizante), tabela de calibração à direita.
+- **Iniciar gravação do centro** → posicione o braço no centro → **Concluir gravação do centro**; depois **Registrar faixa** (fica verde) → percorra cada junta de um limite ao outro, incluindo a garra → clique novamente para parar.
+- Quando as seis juntas estiverem completas, o arquivo de calibração é salvo automaticamente e sobrescreve o anterior.
+
+> ⚠️ Percorra os dois braços na mesma faixa de movimento, caso contrário o movimento do seguidor não vai coincidir com o do líder.
 
 ### 8.2 Aba de Controle de Servo Único
-Controle de posição por controle deslizante, chave de torque.
+- Cada linha: ID / Pos / controle deslizante / L (alvo)
+- **Pos e o controle deslizante são vinculados nos dois sentidos**: arrastar atualiza o Pos; digitar em Pos move o controle deslizante e envia o comando imediatamente
+- O comando é enviado ao soltar, não durante o arraste
 
 ### 8.3 Aba do Depurador FT
 - Conexão serial (1M por padrão), varredura de servos
@@ -120,9 +130,9 @@ Controle de posição por controle deslizante, chave de torque.
 
 ### 8.4 Controle Remoto
 
-> ⚠️ **Direção: a Porta1 controla a Porta2**. A Porta1 (mestre) lê os ângulos, a Porta2 (escrava) é sincronizada. Requer IDs correspondentes nas duas portas.
+> ⚠️ **Direção: o braço líder controla o braço seguidor**. O braço líder (mestre) lê os ângulos; o braço seguidor (escravo) é sincronizado. Requer IDs correspondentes nas duas portas.
 
-Barra superior `🎮 Remoto`: Porta1 lê → Porta2 controla (servos com o mesmo ID nas duas portas)
+Barra superior `🎮 Remoto`: o líder lê → o seguidor controla (servos com o mesmo ID nas duas portas)
 
 ## 9. Solução de Problemas
 

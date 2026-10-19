@@ -70,8 +70,12 @@ Ports (COM & LPT)
 ## 6. Avviare la GUI
 
 ```bash
+python main.py
+# or
 python -m src.gui.factory_calibration_tool
 ```
+
+> **Opzione senza installazione (Windows)**: fai doppio clic su `dist\SO-ARM101-ServoController.exe`; la macchina di destinazione non necessita di Python. Ricompila con `pyinstaller -y SO-ARM101-ServoController.spec`.
 
 Oppure specifica le porte (se sono occupate):
 
@@ -89,16 +93,25 @@ python -m src.gui.factory_calibration_tool --list-ports
 
 ### 7.1 Scheda Calibrazione dei servo
 
-1. Seleziona Port1/Port2 nella barra superiore → scansione automatica dei servo (ID 1-6)
+1. Seleziona la porta del braccio leader/follower nella barra superiore → i servo vengono scansionati automaticamente (ID 1-6).
 2. Pulsanti comuni:
-   - **Calibrazione del centro**: imposta la posizione attuale come centro 2048
-   - **Test del centro**: abilita la coppia e sposta al centro per verificare
-   - **Disattiva servo**: disattiva la coppia per la rotazione manuale
+   - **Calibrazione del centro del braccio leader/follower**: apre la procedura guidata di calibrazione LeRobot
+     - Colonna sinistra: monitor in tempo reale per tutti e sei i servo (ID / Pos / cursore)
+     - **Avvia registrazione centro** (diventa arancione) → porta il braccio al centro → **Termina registrazione centro**
+     - **Registra corsa** (diventa verde) → muovi ogni articolazione da un limite all'altro, pinza inclusa → fai clic di nuovo per fermare
+     - Una volta completate tutte e sei le articolazioni, il file di calibrazione viene salvato automaticamente e sovrascrive il precedente, e offset/limiti vengono riscritti nell'EEPROM dei servo
+   - **Test del centro del braccio leader/follower**: abilita la coppia e sposta al centro per verificare
+   - **Disattiva motori del braccio leader/follower**: disattiva la coppia per la rotazione manuale
+
+> ⚠️ Registra la stessa corsa su entrambi i bracci, altrimenti durante il telecomando il movimento del follower non corrisponderà a quello del leader.
 
 ### 7.2 Scheda Controllo di un singolo servo
 
-- Trascina il cursore → il servo si sposta nella posizione di destinazione al rilascio
-- L'interruttore di coppia controlla i singoli servo
+- Ogni riga: ID / Pos / cursore / L (destinazione)
+- **Pos e il cursore sono bidirezionalmente collegati**: trascinando il cursore si aggiorna Pos; digitando in Pos si sposta il cursore e si invia subito il comando
+- Il comando viene inviato al rilascio del cursore, non continuamente durante il trascinamento
+- Mentre il servo si muove, il cursore e Pos seguono la posizione reale
+- ⚡ Coppia / 🎯 Centro / 🧹 Cancella limiti agiscono su quel singolo servo
 
 ### 7.3 Scheda Debugger FT
 
@@ -118,9 +131,9 @@ python -m src.gui.factory_calibration_tool --list-ports
 
 ### 7.4 Telecomando
 
-> ⚠️ **Direzione: la porta 1 controlla la porta 2**. La porta 1 (master) legge solo gli angoli dei servo, la porta 2 (slave) è sincronizzata. Richiede ID servo corrispondenti su entrambe le porte.
+> ⚠️ **Direzione: il braccio leader controlla il braccio follower**. Il braccio leader (master) legge solo gli angoli dei servo, il braccio follower (slave) è sincronizzato. Richiede ID servo corrispondenti su entrambe le porte.
 
-- Pulsante `🎮 Remote` della barra superiore: la porta 1 legge → la porta 2 controlla (servo con lo stesso ID)
+- Pulsante `🎮 Remote` della barra superiore: il leader legge → il follower controlla (servo con lo stesso ID)
 - Fai clic di nuovo per fermare il telecomando
 
 ## 8. Risoluzione dei problemi

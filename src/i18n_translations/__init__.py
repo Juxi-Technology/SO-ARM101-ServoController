@@ -8,6 +8,7 @@
 - wizard.py      -> src/gui/calibration_wizard.py
 - angle_limit.py -> src/gui/servo_angle_limit_set.py
 - tools.py       -> src/tools/ 下由 GUI 启动的 CLI 工具
+- servo_eeprom.py -> src/servo_eeprom.py（GUI 与 CLI 共用的 EEPROM 读写）
 
 每个文件定义 ``TRANSLATIONS`` 字典：key 为代码中的中文原文，value 为英文译文。
 """
@@ -17,7 +18,8 @@ from src.i18n_translations.wizard import TRANSLATIONS as _WIZARD
 from src.i18n_translations.angle_limit import TRANSLATIONS as _ANGLE_LIMIT
 from src.i18n_translations.tools import TRANSLATIONS as _TOOLS
 from src.i18n_translations.ft_debugger import TRANSLATIONS as _FT_DEBUGGER
+from src.i18n_translations.servo_eeprom import TRANSLATIONS as _SERVO_EEPROM
 
 TRANSLATIONS = {}
-for _dict in (_FACTORY, _WIZARD, _ANGLE_LIMIT, _TOOLS, _FT_DEBUGGER):
+for _dict in (_FACTORY, _WIZARD, _ANGLE_LIMIT, _TOOLS, _FT_DEBUGGER, _SERVO_EEPROM):
     TRANSLATIONS.update(_dict)

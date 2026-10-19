@@ -93,6 +93,8 @@ python setup.py
 ## 6. Lancer l'interface graphique
 
 ```bash
+python main.py
+# or
 python -m src.gui.factory_calibration_tool
 ```
 
@@ -107,10 +109,16 @@ python -m src.gui.factory_calibration_tool --port1 /dev/ttyUSB0 --port2 /dev/tty
 ## 7. Flux de travail de l'interface
 
 ### 7.1 Onglet Calibration des servos
-Sélectionnez le port, analyse automatique des servos ; calibration du centre / test du centre / désactivation des servos.
+Sélectionnez le port leader/follower ; analyse automatique des servos.
+
+- La calibration du centre ouvre l'assistant de calibration LeRobot : moniteur en direct à gauche (ID / Pos / curseur), table de calibration à droite.
+- **Start Recording Middle** → positionnez le bras à son centre → **Finish Recording Middle** ; puis **Record Range** (devient vert) → balayez chaque articulation d'une limite à l'autre, pince comprise → cliquez à nouveau pour arrêter.
+- Une fois les six articulations terminées, le fichier de calibration est enregistré automatiquement et écrase le précédent.
+
+> ⚠️ Balayez les deux bras sur la même course, sinon le mouvement du follower ne correspondra pas à celui du leader.
 
 ### 7.2 Onglet Commande d'un servo individuel
-Contrôle de position par curseur, interrupteur de couple.
+Chaque ligne : ID / Pos / curseur / L (cible). **Pos et le curseur sont liés dans les deux sens** : faire glisser le curseur met Pos à jour ; saisir une valeur dans Pos déplace le curseur et envoie immédiatement la commande. La commande est envoyée au relâchement, pas pendant le glissement.
 
 ### 7.3 Onglet Débogueur FT
 - Connexion série (1M par défaut), analyse des servos
@@ -122,9 +130,9 @@ Contrôle de position par curseur, interrupteur de couple.
 
 ### 7.4 Télécommande
 
-> ⚠️ **Sens : le port 1 commande le port 2**. Le port 1 (maître) lit les angles, le port 2 (esclave) est synchronisé. Nécessite des ID identiques sur les deux ports.
+> ⚠️ **Sens : le bras leader commande le bras follower**. Le bras leader (maître) lit les angles ; le bras follower (esclave) est synchronisé. Nécessite des ID identiques sur les deux ports.
 
-Barre supérieure `🎮 Télécommande` : le port 1 lit → le port 2 contrôle (ID de servos identiques requis sur les deux ports)
+Barre supérieure `🎮 Télécommande` : le leader lit → le follower contrôle (ID de servos identiques requis sur les deux ports)
 
 ## 8. Dépannage
 
