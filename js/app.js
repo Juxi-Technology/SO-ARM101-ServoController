@@ -1,6 +1,6 @@
 import {
   REG, BAUD_TABLE, REGISTERS,
-  SerialLink, MockLink, le16, to16, toSigned,
+  SerialLink, MockLink, le16, to16, toSigned, decodePosition,
 } from './protocol.js';
 import {
   MAX_RES, JOINT_OF_ID, CONTINUOUS_JOINTS,
@@ -226,11 +226,11 @@ async function pollOnce() {
           d = await st.link.read(id, REG.TORQUE, 25, 250);
         } catch { d = null; }
         if (!d || d.length < 24) { st.info[id] = null; continue; }
-        st.pos[id] = normPos(to16(d[16], d[17]));
+        st.pos[id] = decodePosition(to16(d[16], d[17]));
         st.info[id] = {
           torque: d[0] === 1,
           goal: to16(d[2], d[3]),
-          pos: normPos(to16(d[16], d[17])),
+          pos: decodePosition(to16(d[16], d[17])),
           speed: toSigned(to16(d[18], d[19])),
           load: toSigned(to16(d[20], d[21])),
           voltage: d[22] / 10,
@@ -344,10 +344,7 @@ const clampPos = (v) => {
   return Math.max(0, Math.min(MAX_RES, n));
 };
 
-// Present_Position can come back as a multi-turn / negative value (e.g. 32700
-// for -68 = 7*4096 + 4028). The low 12 bits are the real single-turn angle.
-const normPos = (v) => (v & 0xFFF);
-
+// Present_Position is sign-magnitude (sign bit 15); see decodePosition in protocol.js.
 function updateLiveUI() {
   for (const arm of ARMS) {
     const st = state.arms[arm];
@@ -480,7 +477,7 @@ async function toggleRemote() {
         try {
           const d = await L.link.read(id, REG.PRESENT_POS, 2, 200);
           if (!d) continue;
-          const pos = to16(d[0], d[1]);
+          const pos = decodePosition(to16(d[0], d[1]));
           // WritePosEx layout, starting at ACC (41): acc, pos L/H, time L/H, speed L/H
           await F.link.writeOnly(id, REG.ACC, [100, pos & 0xFF, (pos >> 8) & 0xFF, 0, 0, 0xB8, 0x0B]);
         } catch { /* skip this joint for this cycle */ }

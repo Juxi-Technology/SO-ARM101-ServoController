@@ -108,6 +108,18 @@ export function toSigned(v, bits = 16) {
   return (v & (half - 1)) - (v & half ? half * 2 : 0);
 }
 
+/**
+ * Present_Position is sign-magnitude with the sign bit at bit 15 (the Feetech SDK
+ * decodes it with scs_tohost(value, 15)): 0x8001 means -1, not 32769. Masking the
+ * low 12 bits on its own drops the sign, so a joint moving below zero would restart
+ * the display at 0 instead of wrapping. Decode first, then fold into one turn:
+ * -1 -> 4095, -2 -> 4094.
+ */
+export function decodePosition(v) {
+  const magnitude = v & 0x7FFF;
+  return ((v & 0x8000) ? -magnitude : magnitude) & 0xFFF;
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Shared behaviour for real and simulated links. */
@@ -343,7 +355,10 @@ export class MockLink extends BaseLink {
       // register 31 is sign-magnitude (sign bit 11), not two's complement
       const enc = to16(s.regs[REG.OFS], s.regs[REG.OFS + 1]);
       const ofs = (enc & 0x800) ? -(enc & 0x7FF) : (enc & 0x7FF);
-      const present = ((clamped - ofs) % 4096 + 4096) % 4096;
+      // Present_Position is sign-magnitude with the sign bit at 15, as on the real
+      // servo: below zero the high bit is set instead of the value going negative.
+      let present = ((clamped - ofs + 2048) % 4096 + 4096) % 4096 - 2048;
+      if (present < 0) present = (-present) | 0x8000;
       s.regs[REG.PRESENT_POS] = present & 0xFF;
       s.regs[REG.PRESENT_POS + 1] = (present >> 8) & 0xFF;
       s.regs[REG.PRESENT_SPEED] = s.speed & 0xFF;
