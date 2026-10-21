@@ -16,6 +16,27 @@
 
 ---
 
+## 🌐 Web edition (browser)
+
+The same GUI also runs as a static site in the browser — no Python, no installation — using the
+**Web Serial API**:
+
+**https://juxi-technology.github.io/SO-ARM101-ServoController/**
+
+- Serve this repository over HTTPS (or run `python -m http.server` locally and open it) — ES
+  modules do not load from `file://`.
+- **Chrome or Edge 89+ only**: Firefox and Safari do not implement Web Serial.
+- Every tab is available: servo calibration, the LeRobot calibration wizard, single-servo control
+  (Pos ↔ slider two-way binding), the FT debugger and remote control. Tick **Demo mode** to try the
+  whole interface without hardware.
+- Calibration JSON is **downloaded** (browsers cannot write into LeRobot's cache); the wizard shows
+  the target path to move it to.
+
+The web app lives at the repository root (`index.html`, `styles.css`, `js/`). To publish it:
+**Settings → Pages → Deploy from a branch → main / (root)**.
+
+---
+
 ## 📚 Documentation
 
 The full guide — features, interface tour, quick start, step-by-step usage, precautions and troubleshooting — is available in **11 languages**:

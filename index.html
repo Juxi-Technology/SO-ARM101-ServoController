@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SO-ARM101 Servo Controller — Web</title>
+  <meta name="description" content="Browser-based calibration and control tool for SO-ARM101 / Feetech STS3215 servos.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <h1 data-i18n="appTitle"></h1>
+    <span class="sub" data-i18n="appSub"></span>
+  </div>
+
+  <div class="ports">
+    <div class="port-chip" data-arm="leader">
+      <span class="chip-name" data-i18n="leader"></span>
+      <span class="chip-status" id="status-leader">—</span>
+      <button class="small" id="btn-connect-leader" data-i18n="connect"></button>
+    </div>
+    <div class="port-chip" data-arm="follower">
+      <span class="chip-name" data-i18n="follower"></span>
+      <span class="chip-status" id="status-follower">—</span>
+      <button class="small" id="btn-connect-follower" data-i18n="connect"></button>
+    </div>
+    <label class="mock-toggle" title="Demo mode">
+      <input type="checkbox" id="mock-mode">
+      <span data-i18n="mock"></span>
+    </label>
+    <button class="primary" id="btn-remote" data-i18n="remote"></button>
+    <button class="ghost" id="btn-lang" data-i18n="language"></button>
+  </div>
+</header>
+
+<div id="env-banner" class="banner hidden"></div>
+
+<nav class="tabs" role="tablist">
+  <button class="tab active" data-tab="calib" role="tab" data-i18n="tabCalib"></button>
+  <button class="tab" data-tab="single" role="tab" data-i18n="tabSingle"></button>
+  <button class="tab" data-tab="ft" role="tab" data-i18n="tabFt"></button>
+</nav>
+
+<main>
+  <!-- ===================== Servo calibration ===================== -->
+  <section class="panel active" id="panel-calib">
+    <div class="arms">
+      <section class="arm-card" data-arm="leader">
+        <header>
+          <h2 data-i18n="leader"></h2>
+          <span class="conn" id="conn-leader">—</span>
+        </header>
+        <div class="quick">
+          <button data-action="middle-calib" data-arm="leader" data-i18n="middleCalib" class="orange"></button>
+          <button data-action="middle-test" data-arm="leader" data-i18n="middleTest"></button>
+          <button data-action="disable" data-arm="leader" data-i18n="disableMotors"></button>
+        </div>
+        <table class="servo-table">
+          <thead><tr>
+            <th data-i18n="id"></th><th data-i18n="pos"></th><th data-i18n="voltage"></th>
+            <th data-i18n="temp"></th><th data-i18n="torque"></th><th data-i18n="middle"></th>
+            <th data-i18n="clearLimits"></th>
+          </tr></thead>
+          <tbody id="calib-rows-leader"></tbody>
+        </table>
+        <p class="hint" id="calib-hint-leader"></p>
+      </section>
+
+      <section class="arm-card" data-arm="follower">
+        <header>
+          <h2 data-i18n="follower"></h2>
+          <span class="conn" id="conn-follower">—</span>
+        </header>
+        <div class="quick">
+          <button data-action="middle-calib" data-arm="follower" data-i18n="middleCalib" class="orange"></button>
+          <button data-action="middle-test" data-arm="follower" data-i18n="middleTest"></button>
+          <button data-action="disable" data-arm="follower" data-i18n="disableMotors"></button>
+        </div>
+        <table class="servo-table">
+          <thead><tr>
+            <th data-i18n="id"></th><th data-i18n="pos"></th><th data-i18n="voltage"></th>
+            <th data-i18n="temp"></th><th data-i18n="torque"></th><th data-i18n="middle"></th>
+            <th data-i18n="clearLimits"></th>
+          </tr></thead>
+          <tbody id="calib-rows-follower"></tbody>
+        </table>
+        <p class="hint" id="calib-hint-follower"></p>
+      </section>
+    </div>
+  </section>
+
+  <!-- ===================== Single servo control ===================== -->
+  <section class="panel" id="panel-single">
+    <div class="arms">
+      <section class="arm-card" data-arm="leader">
+        <header><h2 data-i18n="leader"></h2><span class="conn" id="single-conn-leader">—</span></header>
+        <div id="single-rows-leader" class="single-rows"></div>
+      </section>
+      <section class="arm-card" data-arm="follower">
+        <header><h2 data-i18n="follower"></h2><span class="conn" id="single-conn-follower">—</span></header>
+        <div id="single-rows-follower" class="single-rows"></div>
+      </section>
+    </div>
+  </section>
+
+  <!-- ===================== FT debugger ===================== -->
+  <section class="panel" id="panel-ft">
+    <div class="ft-toolbar">
+      <label><span data-i18n="leader"></span>/<span data-i18n="follower"></span>
+        <select id="ft-arm">
+          <option value="leader">Leader</option>
+          <option value="follower">Follower</option>
+        </select>
+      </label>
+      <button id="ft-connect" data-i18n="connect"></button>
+      <button id="ft-scan" data-i18n="scan"></button>
+      <button id="ft-read-all" data-i18n="readAll"></button>
+      <select id="ft-servo"></select>
+    </div>
+
+    <div class="ft-grid">
+      <div class="ft-left">
+        <p class="hint" data-i18n="regenerator"></p>
+        <div class="param-wrap">
+          <table class="param-table">
+            <thead><tr>
+              <th data-i18n="address"></th><th>Name</th><th data-i18n="length"></th>
+              <th>Area</th><th data-i18n="value"></th>
+            </tr></thead>
+            <tbody id="ft-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="ft-right">
+        <fieldset>
+          <legend data-i18n="readAll"></legend>
+          <div class="form-row">
+            <label><span data-i18n="address"></span><input id="ft-addr" type="number" min="0" max="255" value="5"></label>
+            <label><span data-i18n="length"></span><input id="ft-len" type="number" min="1" max="32" value="1"></label>
+            <label><span data-i18n="value"></span><input id="ft-val" type="number" min="0" max="4294967295" value="0"></label>
+          </div>
+          <div class="form-row">
+            <button id="ft-read" data-i18n="read"></button>
+            <button id="ft-write" data-i18n="write"></button>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend data-i18n="positionControl"></legend>
+          <input id="ft-pos-range" type="range" min="0" max="4095" value="2048">
+          <div class="form-row">
+            <input id="ft-pos" type="number" min="0" max="4095" value="2048">
+            <button id="ft-move" data-i18n="move"></button>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend data-i18n="baudRate"></legend>
+          <div class="form-row">
+            <select id="ft-baud">
+              <option value="0">1000000</option><option value="1">500000</option>
+              <option value="2">250000</option><option value="3">128000</option>
+              <option value="4">115200</option><option value="5">76800</option>
+              <option value="6">57600</option><option value="7">38400</option>
+            </select>
+            <button id="ft-baud-apply" data-i18n="apply"></button>
+          </div>
+          <button id="ft-factory" class="danger" data-i18n="factoryReset"></button>
+        </fieldset>
+
+        <fieldset>
+          <legend data-i18n="xdatTitle"></legend>
+          <div class="form-row wrap">
+            <button id="xdat-save" data-i18n="xdatSave"></button>
+            <button id="xdat-open" data-i18n="xdatLoad"></button>
+            <button id="xdat-apply" data-i18n="xdatApply" disabled></button>
+          </div>
+          <input id="xdat-file" type="file" accept=".xdat" hidden>
+          <p class="hint" id="xdat-name"></p>
+        </fieldset>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="log-bar">
+  <div class="log-head">
+    <span data-i18n="log"></span>
+    <button class="small" id="btn-clear-log" data-i18n="clearLog"></button>
+  </div>
+  <div id="log" class="log"></div>
+</footer>
+
+<!-- ===================== Calibration wizard ===================== -->
+<dialog id="wizard">
+  <div class="wizard-head">
+    <h2 data-i18n="calibTitle"></h2>
+    <span class="wizard-sub" id="wizard-sub"></span>
+    <button class="ghost" id="wizard-close" data-i18n="close"></button>
+  </div>
+
+  <div class="wizard-body">
+    <section class="monitor">
+      <h3 data-i18n="livePositions"></h3>
+      <div id="wiz-monitor" class="monitor-rows"></div>
+    </section>
+
+    <section class="calib">
+      <h3 data-i18n="calibrationData"></h3>
+      <table class="servo-table wizard-table">
+        <thead><tr>
+          <th data-i18n="id"></th><th data-i18n="centerValue"></th>
+          <th data-i18n="minValue"></th><th data-i18n="maxValue"></th><th data-i18n="status"></th>
+        </tr></thead>
+        <tbody id="wiz-table-body"></tbody>
+      </table>
+
+      <div class="wizard-actions">
+        <button id="wiz-center" class="orange" data-i18n="startCenter"></button>
+        <button id="wiz-range" class="range" data-i18n="recordRange"></button>
+      </div>
+
+      <label class="id-row">
+        <span data-i18n="calibId"></span>
+        <input id="wiz-id" type="text" spellcheck="false">
+      </label>
+
+      <button id="wiz-save" class="primary block" data-i18n="saveCalib"></button>
+      <p class="hint" id="wiz-hint"></p>
+    </section>
+  </div>
+</dialog>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
