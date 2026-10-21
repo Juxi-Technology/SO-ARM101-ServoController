@@ -85,11 +85,12 @@ async function connectArm(arm) {
       link = new MockLink(arm);
       log(t('mockNotice'), 'warn');
     } else {
-      link = await SerialLink.request(1000000, arm);
+      const baud = Number($('#connect-baud').value) || 1000000;
+      link = await SerialLink.request(baud, arm);
     }
     st.link = link;
     st.servos = await scanArm(arm);
-    if (!st.servos.length) throw new Error(t('noServos'));
+    if (!st.servos.length) throw new Error(`${t('noServos')} — ${t('noServosHint')}`);
     log(t('connected', armName(arm)));
     log(t('scanDone', st.servos.join(', ')));
     updatePortChips();
@@ -975,6 +976,7 @@ async function ftApplyBaud() {
     await sleep(200);
     const ok = await link.ping(id);
     if (!ok) throw new Error('ping failed');
+    $('#connect-baud').value = String(baud);
     log(t('baudDone', baud));
   } catch (e) {
     log(t('baudFailed', e.message || e), 'error');
@@ -999,6 +1001,7 @@ async function ftFactoryReset() {
     state.ft.servo = 1;
     st.servos = await scanArm(state.ft.arm);
     refreshFtServoSelect();
+    $('#connect-baud').value = '1000000';
     log(t('factoryDone'));
   } catch (e) {
     log(t('writeFailed', e.message || e), 'error');

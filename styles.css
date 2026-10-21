@@ -121,6 +121,15 @@ input[readonly] {
   user-select: none;
 }
 
+.link-baud {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.link-baud select { padding: 5px 8px; }
+
 /* ---------------- tabs / panels ---------------- */
 .tabs {
   display: flex;

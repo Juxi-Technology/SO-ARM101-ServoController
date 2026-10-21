@@ -26,6 +26,9 @@ The same GUI also runs as a static site in the browser — no Python, no install
 - Serve this repository over HTTPS (or run `python -m http.server` locally and open it) — ES
   modules do not load from `file://`.
 - **Chrome or Edge 89+ only**: Firefox and Safari do not implement Web Serial.
+- The **link baud rate is selectable** next to the port buttons (default 1 Mbaud). If a servo was
+  previously moved to another rate, pick that rate before connecting — the FT debugger can also
+  change a servo's baud rate and reconnects at the new rate.
 - Every tab is available: servo calibration, the LeRobot calibration wizard, single-servo control
   (Pos ↔ slider two-way binding), the FT debugger and remote control. Tick **Demo mode** to try the
   whole interface without hardware.

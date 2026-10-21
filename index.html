@@ -16,6 +16,19 @@
   </div>
 
   <div class="ports">
+    <label class="link-baud">
+      <span data-i18n="connectBaud"></span>
+      <select id="connect-baud">
+        <option value="1000000" selected>1000000</option>
+        <option value="500000">500000</option>
+        <option value="250000">250000</option>
+        <option value="128000">128000</option>
+        <option value="115200">115200</option>
+        <option value="76800">76800</option>
+        <option value="57600">57600</option>
+        <option value="38400">38400</option>
+      </select>
+    </label>
     <div class="port-chip" data-arm="leader">
       <span class="chip-name" data-i18n="leader"></span>
       <span class="chip-status" id="status-leader">—</span>

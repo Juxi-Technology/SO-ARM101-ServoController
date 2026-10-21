@@ -120,6 +120,8 @@ const DICT = {
     copyPath: '复制路径',
     copied: '已复制',
     downloadsNote: '浏览器只会把它下载到「下载」目录，请手动移动过去。',
+    connectBaud: '连接波特率',
+    noServosHint: '若舵机已被改成其它波特率，请切换上方的连接波特率后重试。',
   },
   en: {
     appTitle: 'So-ARM Calibration Suite',
@@ -240,6 +242,8 @@ const DICT = {
     copyPath: 'Copy path',
     copied: 'Copied',
     downloadsNote: 'The browser only downloads it to your Downloads folder; move it there manually.',
+    connectBaud: 'Link baud',
+    noServosHint: 'If a servo was set to another baud rate, change the link baud above and retry.',
   },
 };
 
