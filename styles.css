@@ -67,6 +67,13 @@ input, select {
   min-width: 0;
 }
 
+/* address / length are filled by clicking a row in the register table */
+input[readonly] {
+  background: #f3f5f8;
+  color: #546e7a;
+  cursor: default;
+}
+
 /* ---------------- top bar ---------------- */
 .topbar {
   display: flex;

@@ -153,20 +153,20 @@ function updatePortChips() {
 /* ------------------------------------------------------------------ */
 
 async function writeEeprom(link, id, address, value, length = 2, verify = true) {
-  await link.write(id, REG.LOCK, [0]);
-  await sleep(60);
   const data = length === 2 ? le16(value) : [value & 0xFF];
-  const ok = await link.write(id, address, data);
+  // Some servos do not acknowledge writes (Return_Level), so send them
+  // fire-and-forget and confirm the result by reading the register back.
+  await link.writeOnly(id, REG.LOCK, [0]);
+  await sleep(70);
+  await link.writeOnly(id, address, data);
+  await sleep(60);
+  await link.writeOnly(id, REG.LOCK, [1]);
+  if (!verify) return;
   await sleep(40);
-  await link.write(id, REG.LOCK, [1]);
-  if (!ok) throw new Error(t('failWrite'));
-  if (verify) {
-    await sleep(30);
-    const back = await link.read(id, address, length);
-    if (!back) throw new Error(t('readFailed'));
-    const got = length === 2 ? to16(back[0], back[1]) : back[0];
-    if (got !== value) throw new Error(t('verifyFailed', value, got));
-  }
+  const back = await link.read(id, address, length, 500);
+  if (!back) throw new Error(t('readFailed'));
+  const got = length === 2 ? to16(back[0], back[1]) : back[0];
+  if (got !== value) throw new Error(t('verifyFailed', value, got));
 }
 
 async function readRegister(link, id, address, length) {
@@ -186,7 +186,7 @@ async function resetServoCalibration(arm) {
 
 async function setTorque(arm, id, on) {
   const st = state.arms[arm];
-  await st.link.write(id, REG.TORQUE, [on ? 1 : 0]);
+  await st.link.writeOnly(id, REG.TORQUE, [on ? 1 : 0]);
 }
 
 async function setAllTorque(arm, on) {
@@ -203,7 +203,7 @@ async function sendPosition(arm, id, pos) {
     await setTorque(arm, id, true);
     await sleep(30);
   }
-  await st.link.write(id, REG.GOAL_POS, le16(pos));
+  await st.link.writeOnly(id, REG.GOAL_POS, le16(pos));
   log(`ID${id} → ${pos}`);
 }
 
@@ -406,7 +406,7 @@ async function middleCalibrate(arm, id) {
   if (!st.link?.connected) { log(t('noPort'), 'warn'); return; }
   if (!confirm(t('middleConfirm', id))) return;
   try {
-    await st.link.write(id, REG.TORQUE, [128]); // firmware: set current pose as middle
+    await st.link.writeOnly(id, REG.TORQUE, [128]); // firmware: set current pose as middle
     log(`ID${id} ${t('middleDone')}`);
     await sleep(120);
   } catch (e) {
@@ -432,7 +432,7 @@ async function middleTest(arm) {
   for (const id of st.servos) {
     await setTorque(arm, id, true);
     await sleep(20);
-    await st.link.write(id, REG.GOAL_POS, le16(2048));
+    await st.link.writeOnly(id, REG.GOAL_POS, le16(2048));
   }
   log(t('middleTestDone'));
 }
@@ -476,7 +476,7 @@ async function toggleRemote() {
           if (!d) continue;
           const pos = to16(d[0], d[1]);
           // WritePosEx layout, starting at ACC (41): acc, pos L/H, time L/H, speed L/H
-          await F.link.write(id, REG.ACC, [100, pos & 0xFF, (pos >> 8) & 0xFF, 0, 0, 0xB8, 0x0B]);
+          await F.link.writeOnly(id, REG.ACC, [100, pos & 0xFF, (pos >> 8) & 0xFF, 0, 0, 0xB8, 0x0B]);
         } catch { /* skip this joint for this cycle */ }
       }
       await sleep(40);
@@ -935,7 +935,7 @@ async function ftWriteOne() {
   for (let i = 0; i < len; i++) data.push((value >>> (8 * i)) & 0xFF);
   try {
     if (addr >= 0 && addr <= 48) await writeEeprom(st.link, state.ft.servo, addr, value, len);
-    else await st.link.write(state.ft.servo, addr, data);
+    else await st.link.writeOnly(state.ft.servo, addr, data);
     log(t('okWrite', addr, value >>> 0));
     await sleep(60);
     await ftReadAll();
@@ -950,9 +950,9 @@ async function ftMove() {
   const pos = clampPos($('#ft-pos').value);
   $('#ft-pos').value = pos;
   $('#ft-pos-range').value = pos;
-  await st.link.write(state.ft.servo, REG.TORQUE, [1]);
+  await st.link.writeOnly(state.ft.servo, REG.TORQUE, [1]);
   await sleep(20);
-  await st.link.write(state.ft.servo, REG.GOAL_POS, le16(pos));
+  await st.link.writeOnly(state.ft.servo, REG.GOAL_POS, le16(pos));
   log(`ID${state.ft.servo} → ${pos}`);
 }
 
@@ -1033,7 +1033,7 @@ async function xdatApply() {
     for (let i = 0; i < len; i++) v |= data[addr + i] << (8 * i);
     try {
       if (area === 'EEPROM') await writeEeprom(st.link, state.ft.servo, addr, v, len, false);
-      else await st.link.write(state.ft.servo, addr, Array.from(data.slice(addr, addr + len)));
+      else await st.link.writeOnly(state.ft.servo, addr, Array.from(data.slice(addr, addr + len)));
       written += 1;
     } catch { /* keep going */ }
   }

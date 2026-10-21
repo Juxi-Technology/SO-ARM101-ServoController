@@ -212,7 +212,7 @@ export class SerialLink extends BaseLink {
     try { return await fn(); } finally { release(); }
   }
 
-  _takeFrame(id, timeout = 400) {
+  _takeFrame(id, timeout = 400, expectLen = null) {
     const deadline = Date.now() + timeout;
     return (async () => {
       while (Date.now() < deadline) {
@@ -229,10 +229,11 @@ export class SerialLink extends BaseLink {
             const ok = ((~sum) & 0xFF) === frame[total - 1];
             this.buf.splice(0, total);
             if (!ok) continue;
-            if (id === null || frame[2] === id) {
-              return { id: frame[2], error: frame[4], params: frame.slice(5, total - 1) };
-            }
-            continue; // stale reply for another id
+            if (id !== null && frame[2] !== id) continue; // stale reply for another id
+            const params = frame.slice(5, total - 1);
+            // a short/long frame is not the reply we asked for (e.g. a late ACK)
+            if (expectLen !== null && params.length !== expectLen) continue;
+            return { id: frame[2], error: frame[4], params };
           }
         }
         if (this.error) throw this.error;
@@ -242,33 +243,49 @@ export class SerialLink extends BaseLink {
     })();
   }
 
-  async _transact(packet, expectId, timeout) {
+  async _transact(packet, expectId, timeout, expectLen = null) {
     return this._locked(async () => {
       if (!this.connected) throw new Error('serial port is not open');
+      // The SDK clears the port before every request; do the same so a late
+      // reply from a previous transaction cannot be mistaken for this one.
+      this.buf.length = 0;
       const writer = this.port.writable.getWriter();
       try {
         await writer.write(packet);
       } finally {
         writer.releaseLock();
       }
-      return this._takeFrame(expectId, timeout);
+      return this._takeFrame(expectId, timeout, expectLen);
     });
   }
 
   async ping(id) {
-    const f = await this._transact(buildPacket(id, INST.PING), id, 200);
+    const f = await this._transact(buildPacket(id, INST.PING), id, 200, 0);
     return !!f;
   }
 
   async read(id, address, length, timeout = 400) {
-    const f = await this._transact(buildPacket(id, INST.READ, [address & 0xFF, length & 0xFF]), id, timeout);
-    if (!f || f.params.length < length) return null;
-    return f.params.slice(0, length);
+    const f = await this._transact(buildPacket(id, INST.READ, [address & 0xFF, length & 0xFF]), id, timeout, length);
+    return f ? f.params.slice(0, length) : null;
   }
 
   async write(id, address, data, timeout = 400) {
-    const f = await this._transact(buildPacket(id, INST.WRITE, [address & 0xFF, ...data]), id, timeout);
+    const f = await this._transact(buildPacket(id, INST.WRITE, [address & 0xFF, ...data]), id, timeout, 0);
     return !!f;
+  }
+
+  /** Fire-and-forget write: do not wait for a status packet. */
+  async writeOnly(id, address, data) {
+    return this._locked(async () => {
+      if (!this.connected) throw new Error('serial port is not open');
+      const writer = this.port.writable.getWriter();
+      try {
+        await writer.write(buildPacket(id, INST.WRITE, [address & 0xFF, ...data]));
+      } finally {
+        writer.releaseLock();
+      }
+      await sleep(2);
+    });
   }
 
   async close() {
@@ -376,6 +393,12 @@ export class MockLink extends BaseLink {
     }
     return true;
   }
+
+  async writeOnly(id, address, data) {
+    return this.write(id, address, data);
+  }
+
+  flush() { /* nothing buffered on the simulated bus */ }
 
   async close() { clearInterval(this._timer); this.connected = false; }
 }
