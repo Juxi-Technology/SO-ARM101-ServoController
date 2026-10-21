@@ -798,13 +798,45 @@ async function saveWizard(auto = false) {
     w.savedPath = calibrationPath(w.type, calibId);
 
     const armLabel = armName(w.arm);
-    log(t('saved', armLabel, `${calibId}.json`, calibId) + (auto ? ` — ${t('autoSaved')}` : ''));
+    log(t('saved', armLabel, `${calibId}.json`, calibId) + ` → ${w.savedPath}` + (auto ? ` — ${t('autoSaved')}` : ''));
     if (failed.length) log(t('writeFailed', failed.join('; ')), 'error');
-    $('#wiz-hint').textContent = t('saveNote', w.savedPath);
+    showSaveResult(w, auto);
   } finally {
     w.busy = false;
     setWizardButtons();
   }
+}
+
+function showSaveResult(w, auto) {
+  const hint = $('#wiz-hint');
+  const name = `${w.id}.json`;
+  hint.innerHTML = `
+    <div class="save-result">
+      <div class="save-title">✅ ${t('savedTitle')}${auto ? ' · ' + t('autoSaved') : ''}：<b>${escapeHtml(name)}</b></div>
+      <div class="save-label">${t('needAt')}</div>
+      <div class="save-path">
+        <code>${escapeHtml(w.savedPath)}</code>
+        <button class="small" id="copy-path">${t('copyPath')}</button>
+      </div>
+      <div class="save-note">${t('downloadsNote')}</div>
+    </div>`;
+  const btn = $('#copy-path');
+  if (btn) {
+    btn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(w.savedPath);
+        btn.textContent = t('copied');
+        setTimeout(() => { btn.textContent = t('copyPath'); }, 1500);
+      } catch {
+        const range = document.createRange();
+        range.selectNodeContents(hint.querySelector('code'));
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    });
+  }
+  hint.scrollIntoView({ block: 'nearest' });
 }
 
 function closeWizard() {
@@ -1116,6 +1148,7 @@ boot();
 // Debug handle: the demo-mode smoke test uses it, and it is handy in the console.
 window.__soarm = {
   state,
+  showSaveResult,
   mockMove(arm, id, pos) {
     const link = state.arms[arm]?.link;
     if (!link?.isMock) return false;

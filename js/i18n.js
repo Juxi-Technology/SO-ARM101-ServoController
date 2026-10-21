@@ -115,6 +115,11 @@ const DICT = {
     baudFailed: '波特率切换失败：{0}',
     alreadyConnected: '该臂已连接',
     xdatApplyConfirm: '把 xdat 参数写入 ID{0} 的 EEPROM？这会覆盖 ID、波特率和限位等设置。',
+    savedTitle: '校准文件已保存',
+    needAt: 'LeRobot 需要它位于：',
+    copyPath: '复制路径',
+    copied: '已复制',
+    downloadsNote: '浏览器只会把它下载到「下载」目录，请手动移动过去。',
   },
   en: {
     appTitle: 'So-ARM Calibration Suite',
@@ -230,6 +235,11 @@ const DICT = {
     baudFailed: 'Baud rate switch failed: {0}',
     alreadyConnected: 'That arm is already connected',
     xdatApplyConfirm: 'Write the xdat parameters into ID{0}? This overwrites the ID, baud rate, limits, etc.',
+    savedTitle: 'Calibration file saved',
+    needAt: 'LeRobot needs it at:',
+    copyPath: 'Copy path',
+    copied: 'Copied',
+    downloadsNote: 'The browser only downloads it to your Downloads folder; move it there manually.',
   },
 };
 
