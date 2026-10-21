@@ -52,6 +52,7 @@ TRANSLATIONS = {
     "✏️ 写入": "✏️ Write",
     "📖 读取": "📖 Read",
     "请先在参数表中选择要读取的寄存器": "Please select a register in the parameter table first",
+    "出厂默认参数，不可读写": "Factory default parameter; read/write not available",
     "读取 ID{} 地址 0x{:02X} 失败": "Failed to read ID{} addr 0x{:02X}",
     "读取异常: {}": "Read error: {}",
     "写入 ID{} 地址 0x{:02X} = {}": "Write ID{} addr 0x{:02X} = {}",

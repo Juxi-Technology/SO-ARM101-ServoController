@@ -1603,13 +1603,13 @@ class ServoPanel(QWidget):
                     font-weight: bold;
                 }
                 QPushButton:checked {
-                    background-color: #26a69a;
+                    background-color: #c62828;
                 }
                 QPushButton:hover {
                     background-color: #5a6268;
                 }
                 QPushButton:checked:hover {
-                    background-color: #00897b;
+                    background-color: #b71c1c;
                 }
             """)
             torque_btn.toggled.connect(lambda checked, sid=servo_id: self.on_torque_toggled(sid, checked))

@@ -362,12 +362,13 @@ function updateLiveUI() {
         c.p.textContent = isOn && info ? info.pos : '--';
         c.v.textContent = isOn && info ? info.voltage.toFixed(1) + 'V' : '--';
         c.tt.textContent = isOn && info ? info.temp + '°C' : '--';
-        c.tq.classList.toggle('primary', !!info?.torque);
+        c.tq.classList.toggle('torque-on', !!info?.torque);
       }
 
       const s = ui.single[arm]?.[id];
       if (s) {
         s.row.classList.toggle('offline', !isOn);
+        s.tq.classList.toggle('torque-on', !!info?.torque);
         if (isOn && info) {
           const active = document.activeElement === s.pos;
           if (!active && !s.dragging) {
@@ -904,15 +905,21 @@ function renderFtTable() {
     if (len === 1 && regs[addr] != null) value = String(regs[addr]);
     else if (len === 2 && regs[addr] != null && regs[addr + 1] != null) value = String(to16(regs[addr], regs[addr + 1]));
     const tr = document.createElement('tr');
+    const locked = area === 'DEFAULT';
     tr.innerHTML = `<td>${addr}</td><td>${name}</td><td>${len}</td><td>${area}</td><td class="num">${value}</td>`;
-    tr.addEventListener('click', () => {
-      $$('#ft-table-body tr').forEach((r) => r.classList.remove('selected'));
-      tr.classList.add('selected');
-      $('#ft-addr').value = addr;
-      $('#ft-len').value = len;
-      const v = len === 2 ? to16(regs[addr] ?? 0, regs[addr + 1] ?? 0) : (regs[addr] ?? 0);
-      $('#ft-val').value = String(v);
-    });
+    if (locked) {
+      tr.classList.add('locked');
+      tr.title = t('lockedRow');
+    } else {
+      tr.addEventListener('click', () => {
+        $$('#ft-table-body tr').forEach((r) => r.classList.remove('selected'));
+        tr.classList.add('selected');
+        $('#ft-addr').value = addr;
+        $('#ft-len').value = len;
+        const v = len === 2 ? to16(regs[addr] ?? 0, regs[addr + 1] ?? 0) : (regs[addr] ?? 0);
+        $('#ft-val').value = String(v);
+      });
+    }
     body.appendChild(tr);
   }
 }

@@ -59,6 +59,15 @@ button.range.active { background: var(--green); border-color: #1b5e20; color: #f
 button.danger { background: #ffebee; border-color: #ef9a9a; color: var(--red); }
 button.block { width: 100%; }
 
+/* torque is on: red, because the motor is energized */
+button.torque-on {
+  background: #ffebee;
+  border-color: #ef9a9a;
+  color: var(--red);
+  font-weight: 700;
+}
+button.torque-on:hover { background: #ffcdd2; border-color: #e57373; }
+
 input, select {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -215,6 +224,8 @@ main { flex: 1 1 auto; padding: 0 20px 16px; }
 .param-table tbody tr { cursor: pointer; }
 .param-table tbody tr:hover { background: #f3f6fb; }
 .param-table tbody tr.selected { background: #e8eaf6; }
+.param-table tbody tr.locked { color: #90a4ae; cursor: default; }
+.param-table tbody tr.locked:hover { background: transparent; }
 .param-table td:nth-child(1), .param-table td:nth-child(3) { font-variant-numeric: tabular-nums; }
 
 /* ---------------- single servo ---------------- */

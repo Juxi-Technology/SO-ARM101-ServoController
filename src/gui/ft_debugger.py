@@ -960,6 +960,13 @@ class FtDebuggerPanel(QWidget):
                 if col != 2:
                     it.setForeground(QColor("#263238"))
                 self.param_table.setItem(row, col, it)
+            if area == "DEFAULT":
+                # 出厂默认参数不可读也不可写，禁止选中（避免联动到写入地址）
+                for col in range(5):
+                    it = self.param_table.item(row, col)
+                    it.setFlags(it.flags() & ~Qt.ItemIsSelectable)
+                    it.setForeground(QColor("#90a4ae"))
+                    it.setToolTip(tr("出厂默认参数，不可读写"))
 
     def _on_param_row_selected(self):
         """参数表选中某行时，把该寄存器地址/长度自动同步到"写入"控件"""
