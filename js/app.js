@@ -176,15 +176,6 @@ async function readRegister(link, id, address, length) {
   return length === 2 ? to16(data[0], data[1]) : data[0];
 }
 
-async function resetServoCalibration(arm) {
-  const st = state.arms[arm];
-  for (const id of st.servos) {
-    await writeEeprom(st.link, id, REG.OFS, 0);
-    await writeEeprom(st.link, id, REG.MIN_LIMIT, 0);
-    await writeEeprom(st.link, id, REG.MAX_LIMIT, MAX_RES);
-  }
-}
-
 async function setTorque(arm, id, on) {
   const st = state.arms[arm];
   await st.link.writeOnly(id, REG.TORQUE, [on ? 1 : 0]);
@@ -528,9 +519,12 @@ function openWizard(arm) {
   setWizardButtons();
   (async () => {
     try {
+      // Only release the motors so the arm can be posed by hand. The stored
+      // calibration is left untouched here: opening the wizard must not undo a
+      // middle value you just wrote, and the offset is cleared again anyway when
+      // recording starts.
       await setAllTorque(arm, false);
-      await resetServoCalibration(arm);
-      log(t('resetDone'));
+      log(t('disabledDone'));
     } catch (e) {
       log(t('writeFailed', e.message || e), 'error');
     } finally {
