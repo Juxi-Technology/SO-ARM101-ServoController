@@ -151,7 +151,8 @@ class PositionReader(QObject):
                     try:
                         pos, result, _error = self.servo_handler.ReadPos(servo_id)
                         if result == COMM_SUCCESS:
-                            positions[servo_id] = pos
+                            # low 12 bits: the register can report a multi-turn value
+                            positions[servo_id] = pos & 0xFFF
                     except Exception as e:
                         print(tr("[DEBUG] 读取 ID{} 异常: {}").format(servo_id, e))
             if positions:

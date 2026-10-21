@@ -226,11 +226,11 @@ async function pollOnce() {
           d = await st.link.read(id, REG.TORQUE, 25, 250);
         } catch { d = null; }
         if (!d || d.length < 24) { st.info[id] = null; continue; }
-        st.pos[id] = to16(d[16], d[17]);
+        st.pos[id] = normPos(to16(d[16], d[17]));
         st.info[id] = {
           torque: d[0] === 1,
           goal: to16(d[2], d[3]),
-          pos: to16(d[16], d[17]),
+          pos: normPos(to16(d[16], d[17])),
           speed: toSigned(to16(d[18], d[19])),
           load: toSigned(to16(d[20], d[21])),
           voltage: d[22] / 10,
@@ -338,11 +338,15 @@ function buildSingleRows() {
   }
 }
 
-function clampPos(v) {
+const clampPos = (v) => {
   const n = Math.round(Number(v));
   if (!Number.isFinite(n)) return 2048;
   return Math.max(0, Math.min(MAX_RES, n));
-}
+};
+
+// Present_Position can come back as a multi-turn / negative value (e.g. 32700
+// for -68 = 7*4096 + 4028). The low 12 bits are the real single-turn angle.
+const normPos = (v) => (v & 0xFFF);
 
 function updateLiveUI() {
   for (const arm of ARMS) {

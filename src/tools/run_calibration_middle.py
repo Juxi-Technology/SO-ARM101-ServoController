@@ -243,6 +243,7 @@ def run_to_middle(port_name: str, calibration_path: str, mode: str = "zero") -> 
                 position, result, error = servo_handler.ReadPos(servo_id)
                 display_name = JOINT_NAME_MAP.get(joint_name, joint_name)
                 if result == COMM_SUCCESS:
+                    position &= 0xFFF  # low 12 bits: 可能是多圈/负值
                     diff = position - target
                     print(f"  ID{servo_id} ({display_name}): {tr('当前')} {position:4d} | {tr('目标')} {target:4d} | {tr('偏差')} {diff:+4d}")
                 else:

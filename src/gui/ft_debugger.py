@@ -292,7 +292,7 @@ class FtWorker(QObject):
         info = {}
         try:
             pos, r, _ = self.servo.ReadPos(servo_id)
-            info["position"] = pos if r == COMM_SUCCESS else None
+            info["position"] = (pos & 0xFFF) if r == COMM_SUCCESS else None
 
             speed, r, _ = self.servo.ReadSpeed(servo_id)
             info["speed"] = speed if r == COMM_SUCCESS else None

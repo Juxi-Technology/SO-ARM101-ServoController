@@ -82,7 +82,8 @@ def read_position(servo_handler, servo_id: int) -> Optional[int]:
     """读取单个舵机当前位置"""
     position, result, error = servo_handler.ReadPos(servo_id)
     if result == COMM_SUCCESS:
-        return position
+        # low 12 bits: Present_Position can report a multi-turn/negative value
+        return position & 0xFFF
     return None
 
 

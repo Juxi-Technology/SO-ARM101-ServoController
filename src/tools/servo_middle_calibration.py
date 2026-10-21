@@ -106,7 +106,7 @@ def read_positions(servo_handler, servo_list: list) -> dict:
     for servo_id in servo_list:
         position, result, error = servo_handler.ReadPos(servo_id)
         if result == COMM_SUCCESS:
-            positions[servo_id] = position
+            positions[servo_id] = position & 0xFFF
         time.sleep(0.05)
     return positions
 
@@ -193,7 +193,7 @@ def read_servo_info(servo_handler, servo_id: int) -> dict:
     # 位置
     pos, result, _ = servo_handler.ReadPos(servo_id)
     if result == COMM_SUCCESS:
-        info["position"] = pos
+        info["position"] = pos & 0xFFF
     time.sleep(0.02)
 
     # 速度

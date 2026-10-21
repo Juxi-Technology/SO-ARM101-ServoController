@@ -984,7 +984,9 @@ class ServoWorker(QObject):
             try:
                 pos, result, _ = self.servo_handler.ReadPos(servo_id)
                 if result == COMM_SUCCESS:
-                    servo_info["position"] = pos
+                    # Present_Position can be a multi-turn/negative value (e.g. 32700
+                    # for -68 = 7*4096 + 4028); the low 12 bits are the real angle.
+                    servo_info["position"] = pos & 0xFFF
 
                 speed, result, _ = self.servo_handler.ReadSpeed(servo_id)
                 if result == COMM_SUCCESS:
