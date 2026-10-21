@@ -473,6 +473,7 @@ class FtDebuggerPanel(QWidget):
 
         self.current_servos: List[int] = []
         self._move_done_pending = False  # 移动完成提示显示中，读取状态时保留
+        self._pending_read = None        # 单寄存器读取：等待回填"值"的 (地址, 长度)
         self.init_ui()
         if port_name:
             self.port_combo.setCurrentText(port_name)
@@ -611,7 +612,11 @@ class FtDebuggerPanel(QWidget):
                 val_item.setBackground(item.background())
                 val_item.setForeground(QColor("#263238"))
                 self.param_table.setItem(row, 2, val_item)
-                return
+                break
+        # 单寄存器读取：把值回填到"值"输入框
+        if self._pending_read and self._pending_read[0] == address:
+            self.edit_val_spin.setValue(int(value))
+            self._pending_read = None
 
     def _on_status_read(self, servo_id, info):
         # 移动完成提示显示中，保留提示不被状态覆盖；用户再点"读取状态"时清除
@@ -794,6 +799,15 @@ class FtDebuggerPanel(QWidget):
         self.edit_val_spin = QSpinBox()
         self.edit_val_spin.setRange(0, 2147483647)
         edit_row.addWidget(self.edit_val_spin)
+
+        self.read_btn = QPushButton(tr("📖 读取"))
+        self.read_btn.setStyleSheet("""
+            QPushButton { background-color: #26a69a; color: white; border: none;
+                padding: 6px 14px; border-radius: 4px; font-weight: bold; }
+            QPushButton:hover { background-color: #00897b; }
+        """)
+        self.read_btn.clicked.connect(self.on_read_param)
+        edit_row.addWidget(self.read_btn)
 
         self.write_btn = QPushButton(tr("✏️ 写入"))
         self.write_btn.setStyleSheet("""
@@ -1020,6 +1034,21 @@ class FtDebuggerPanel(QWidget):
         if sid is not None:
             self._move_done_pending = False  # 清除"移动完成"提示，恢复状态实时刷新
             self.worker.submit(self.worker.read_status, sid)
+
+    def on_read_param(self):
+        """读取参数表里选中的单个寄存器，并把值回填到"值"输入框"""
+        sid = self.current_servo_id()
+        if sid is None:
+            return
+        try:
+            addr = int(self.edit_addr_label.text(), 16)
+        except ValueError:
+            QMessageBox.warning(self, tr("提示"), tr("请先在参数表中选择要读取的寄存器"))
+            return
+        len_text = self.edit_len_label.text()
+        ln = int(len_text.split()[0]) if len_text.split() else 1
+        self._pending_read = (addr, ln)
+        self.worker.submit(self.worker.read_param, sid, addr, ln)
 
     def on_write_param(self):
         sid = self.current_servo_id()
