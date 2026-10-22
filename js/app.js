@@ -195,6 +195,11 @@ async function setAllTorque(arm, on) {
   for (const id of st.servos) await setTorque(arm, id, on);
 }
 
+// A bare Goal_Position write leaves the servo running at its own maximum speed.
+// Send the WritePosEx block instead (starting at ACC) so the move is capped.
+const MOVE_SPEED = 1200; // steps/s, roughly 105 deg/s on a 12-bit encoder
+const MOVE_ACC = 50;
+
 async function sendPosition(arm, id, pos) {
   const st = state.arms[arm];
   if (!st.link?.connected) { log(t('noPort'), 'warn'); return; }
@@ -204,7 +209,11 @@ async function sendPosition(arm, id, pos) {
     await setTorque(arm, id, true);
     await sleep(30);
   }
-  await st.link.writeOnly(id, REG.GOAL_POS, le16(pos));
+  // WritePosEx layout: acc, position L/H, time L/H, speed L/H
+  await st.link.writeOnly(id, REG.ACC, [
+    MOVE_ACC, pos & 0xFF, (pos >> 8) & 0xFF, 0, 0,
+    MOVE_SPEED & 0xFF, (MOVE_SPEED >> 8) & 0xFF,
+  ]);
   log(`ID${id} → ${pos}`);
 }
 

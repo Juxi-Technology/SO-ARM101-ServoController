@@ -953,7 +953,8 @@ class ServoWorker(QObject):
                 servo_id, position = self.position_queue.get_nowait()
                 # 确保力矩已开启
                 self.servo_handler.write1ByteTxRx(servo_id, 40, 1)
-                result, error = self.servo_handler.WritePosEx(servo_id, position, 1000, 50)
+                # 速度限到 1200 步/秒（约 105°/s），否则滑到远处时舵机会满速冲过去
+                result, error = self.servo_handler.WritePosEx(servo_id, position, 1200, 50)
                 if result == COMM_SUCCESS:
                     self.log_message.emit(f"🎯 ID{servo_id} -> {position}", self.port_id)
                 else:
